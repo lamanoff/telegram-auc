@@ -6,6 +6,9 @@ COPY package*.json ./
 RUN npm install
 
 COPY . .
+
+# Инвалидация кэша при каждом деплое
+ARG CACHEBUST=1
 RUN npm run build
 
 FROM nginx:alpine
