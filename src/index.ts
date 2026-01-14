@@ -84,7 +84,8 @@ async function bootstrap() {
 
   app.use((err: unknown, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
     if (err instanceof ZodError) {
-      return res.status(400).json({ error: "Invalid input data" });
+      const issues = err.issues.map(i => `${i.path.join('.')}: ${i.message}`).join('; ');
+      return res.status(400).json({ error: `Validation error: ${issues}` });
     }
     if (err instanceof HttpError) {
       return res.status(err.status).json({ error: err.message });

@@ -417,15 +417,39 @@ const createAuction = async () => {
   createSuccess.value = false
   
   try {
+    // Валидация обязательных полей
+    if (!form.value.title?.trim()) {
+      createError.value = 'Укажите название аукциона'
+      creating.value = false
+      return
+    }
+    if (!form.value.startTime) {
+      createError.value = 'Укажите дату начала'
+      creating.value = false
+      return
+    }
+    
     const data = {
-      ...form.value,
-      startTime: new Date(form.value.startTime).toISOString()
+      title: form.value.title.trim(),
+      currency: form.value.currency,
+      roundsCount: form.value.roundsCount,
+      itemsPerRound: form.value.itemsPerRound,
+      startTime: new Date(form.value.startTime).toISOString(),
+      firstRoundDurationSec: form.value.firstRoundDurationSec,
+      roundDurationSec: form.value.roundDurationSec,
+      startingPrice: String(form.value.startingPrice),
+      minIncrement: String(form.value.minIncrement),
     }
-    if (!data.totalItems) {
-      delete data.totalItems
+    
+    // Опциональные поля
+    if (form.value.description?.trim()) {
+      data.description = form.value.description.trim()
     }
-    if (!data.reservePrice) {
-      delete data.reservePrice
+    if (form.value.totalItems) {
+      data.totalItems = form.value.totalItems
+    }
+    if (form.value.reservePrice) {
+      data.reservePrice = String(form.value.reservePrice)
     }
     
     const response = await api.post('/auctions', data)
