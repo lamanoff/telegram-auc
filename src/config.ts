@@ -43,5 +43,6 @@ export const config = {
   cryptoBotToken: process.env.CRYPTOBOT_TOKEN ?? "",
   cryptoBotWebhookSecret: process.env.CRYPTOBOT_WEBHOOK_SECRET ?? "",
   telegramBotToken: process.env.TELEGRAM_BOT_TOKEN ?? "",
+  telegramBotUsername: process.env.TELEGRAM_BOT_USERNAME ?? "",
   redisUrl: process.env.REDIS_URL ?? "redis://redis:6379",
 };

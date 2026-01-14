@@ -38,7 +38,7 @@
     </main>
     <footer class="footer">
       <div class="container">
-        <p>© 2025 CryptoAuction Platform · Powered by Blockchain</p>
+        <p>© 2026 CryptoAuction Platform · Powered by Blockchain</p>
       </div>
     </footer>
   </div>

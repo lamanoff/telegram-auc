@@ -28,20 +28,30 @@ async function bootstrap() {
       directives: {
         defaultSrc: ["'self'"],
         styleSrc: ["'self'", "'unsafe-inline'"],
-        scriptSrc: ["'self'"],
+        scriptSrc: ["'self'", "https://telegram.org"],
+        frameSrc: ["'self'", "https://oauth.telegram.org"],
         imgSrc: ["'self'", "data:", "https:"],
       },
     },
     crossOriginEmbedderPolicy: false,
   }));
 
-  const allowedOrigins = process.env.FRONTEND_URL 
-    ? process.env.FRONTEND_URL.split(',').map(o => o.trim())
-    : ['http://localhost', 'http://localhost:80', 'http://localhost:5173'];
+  const defaultOrigins = ['http://localhost', 'http://localhost:80', 'http://localhost:5173'];
+  const customOrigins = process.env.FRONTEND_URL 
+    ? process.env.FRONTEND_URL.split(',').map(o => o.trim().replace(/\/$/, ''))
+    : [];
+  const allowedOrigins = [...new Set([...defaultOrigins, ...customOrigins])];
   
   app.use(cors({
     origin: (origin, callback) => {
-      if (!origin || allowedOrigins.some(o => origin.startsWith(o))) {
+      // Разрешаем запросы без origin (например, от того же домена через nginx)
+      if (!origin) {
+        callback(null, true);
+        return;
+      }
+      // Проверяем точное совпадение origin
+      const normalizedOrigin = origin.replace(/\/$/, '');
+      if (allowedOrigins.includes(normalizedOrigin)) {
         callback(null, true);
       } else {
         callback(new Error('Not allowed by CORS'));
@@ -58,6 +68,10 @@ async function bootstrap() {
   app.use("/api", webhookRoutes);
 
   app.get("/health", (_req, res) => res.json({ status: "ok" }));
+
+  app.get("/api/config", (_req, res) => res.json({
+    telegramBotUsername: config.telegramBotUsername || null,
+  }));
 
   app.use("/api", authRoutes);
   app.use("/api", userRoutes);

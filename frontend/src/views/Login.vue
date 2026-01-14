@@ -46,6 +46,14 @@
           {{ loading ? 'Вход...' : 'Войти' }}
         </button>
       </form>
+
+      <!-- Telegram Login Widget -->
+      <div v-if="telegramBotUsername" class="telegram-login-section">
+        <div class="divider">
+          <span>или</span>
+        </div>
+        <div class="telegram-widget-container" ref="telegramContainer"></div>
+      </div>
       
       <div class="auth-footer">
         <p>Нет аккаунта? <router-link to="/register">Зарегистрироваться</router-link></p>
@@ -55,9 +63,10 @@
 </template>
 
 <script setup>
-import { ref } from 'vue'
+import { ref, onMounted, nextTick } from 'vue'
 import { useRouter } from 'vue-router'
 import { useAuthStore } from '../stores/auth'
+import api from '../api'
 
 const router = useRouter()
 const authStore = useAuthStore()
@@ -67,6 +76,8 @@ const password = ref('')
 const error = ref('')
 const loading = ref(false)
 const showPassword = ref(false)
+const telegramBotUsername = ref('')
+const telegramContainer = ref(null)
 
 const handleLogin = async () => {
   error.value = ''
@@ -82,6 +93,55 @@ const handleLogin = async () => {
   
   loading.value = false
 }
+
+const handleTelegramAuth = async (user) => {
+  error.value = ''
+  loading.value = true
+  
+  const result = await authStore.telegramAuth(user)
+  
+  if (result.success) {
+    router.push('/auctions')
+  } else {
+    error.value = result.error
+  }
+  
+  loading.value = false
+}
+
+const loadTelegramWidget = async () => {
+  try {
+    const { data } = await api.get('/config')
+    if (data.telegramBotUsername) {
+      telegramBotUsername.value = data.telegramBotUsername
+      
+      await nextTick()
+      
+      // Регистрируем глобальный callback
+      window.onTelegramAuth = handleTelegramAuth
+      
+      // Создаём скрипт виджета
+      const script = document.createElement('script')
+      script.async = true
+      script.src = 'https://telegram.org/js/telegram-widget.js?22'
+      script.setAttribute('data-telegram-login', data.telegramBotUsername)
+      script.setAttribute('data-size', 'large')
+      script.setAttribute('data-radius', '8')
+      script.setAttribute('data-onauth', 'onTelegramAuth(user)')
+      script.setAttribute('data-request-access', 'write')
+      
+      if (telegramContainer.value) {
+        telegramContainer.value.appendChild(script)
+      }
+    }
+  } catch (err) {
+    console.error('Failed to load Telegram config:', err)
+  }
+}
+
+onMounted(() => {
+  loadTelegramWidget()
+})
 </script>
 
 <style scoped>
@@ -192,6 +252,36 @@ const handleLogin = async () => {
 
 @keyframes spin {
   to { transform: rotate(360deg); }
+}
+
+.telegram-login-section {
+  margin-bottom: 24px;
+}
+
+.divider {
+  display: flex;
+  align-items: center;
+  margin: 24px 0;
+  color: var(--text-secondary);
+  font-size: 14px;
+}
+
+.divider::before,
+.divider::after {
+  content: '';
+  flex: 1;
+  height: 1px;
+  background: var(--border-color);
+}
+
+.divider span {
+  padding: 0 16px;
+}
+
+.telegram-widget-container {
+  display: flex;
+  justify-content: center;
+  min-height: 40px;
 }
 
 .auth-footer {

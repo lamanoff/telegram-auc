@@ -34,6 +34,19 @@ export const useAuthStore = defineStore('auth', () => {
     }
   }
 
+  async function telegramAuth(telegramUser) {
+    try {
+      const response = await api.post('/telegramAuth', telegramUser)
+      token.value = response.data.token
+      user.value = response.data.user
+      localStorage.setItem('token', token.value)
+      api.defaults.headers.common['Authorization'] = `Bearer ${token.value}`
+      return { success: true }
+    } catch (error) {
+      return { success: false, error: error.response?.data?.error || 'Ошибка авторизации через Telegram' }
+    }
+  }
+
   async function fetchProfile() {
     try {
       const response = await api.get('/profile')
@@ -63,6 +76,7 @@ export const useAuthStore = defineStore('auth', () => {
     isAuthenticated,
     login,
     register,
+    telegramAuth,
     fetchProfile,
     logout
   }
