@@ -4,9 +4,6 @@ services:
     container_name: auction-mongo
     ports:
       - "27017:27017"
-    volumes:
-      - mongo_data:/data/db
-      - ./mongo-init:/docker-entrypoint-initdb.d:ro
     command: mongod --replSet rs0 --bind_ip_all
     healthcheck:
       test: |
@@ -23,8 +20,6 @@ services:
     container_name: auction-redis
     ports:
       - "6379:6379"
-    volumes:
-      - redis_data:/data
     command: redis-server --appendonly yes --maxmemory 512mb --maxmemory-policy noeviction
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
@@ -71,10 +66,6 @@ services:
     networks:
       - auction-network
     restart: unless-stopped
-
-volumes:
-  mongo_data:
-  redis_data:
 
 networks:
   auction-network:
