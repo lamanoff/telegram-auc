@@ -46,16 +46,26 @@ const router = createRouter({
   ]
 })
 
-router.beforeEach((to, from, next) => {
+router.beforeEach(async (to, from, next) => {
   const authStore = useAuthStore()
   
   if (to.meta.requiresAuth && !authStore.isAuthenticated) {
     next({ name: 'login' })
-  } else if (to.meta.requiresAdmin && authStore.user?.role !== 'admin') {
-    next({ name: 'home' })
-  } else {
-    next()
+    return
   }
+  
+  // Для админских маршрутов ждём загрузки профиля
+  if (to.meta.requiresAdmin) {
+    if (!authStore.user && authStore.isAuthenticated) {
+      await authStore.fetchProfile()
+    }
+    if (authStore.user?.role !== 'admin') {
+      next({ name: 'home' })
+      return
+    }
+  }
+  
+  next()
 })
 
 export default router

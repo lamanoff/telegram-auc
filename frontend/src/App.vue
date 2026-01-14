@@ -17,6 +17,10 @@
                 <span class="nav-icon">👤</span>
                 Профиль
               </router-link>
+              <router-link v-if="authStore.user?.role === 'admin'" to="/admin" class="nav-link admin-link">
+                <span class="nav-icon">⚙️</span>
+                Админка
+              </router-link>
               <div class="balance-display">
                 <span class="balance-label">Баланс</span>
                 <span class="balance-value">{{ formatBalance(authStore.user?.balances?.TON?.available || '0', 'TON') }}</span>
@@ -122,6 +126,19 @@ const handleLogout = () => {
 .nav-link.router-link-active {
   color: var(--accent-cyan);
   background: rgba(0, 212, 255, 0.1);
+}
+
+.nav-link.admin-link {
+  color: var(--accent-purple);
+}
+
+.nav-link.admin-link:hover {
+  background: rgba(168, 85, 247, 0.1);
+}
+
+.nav-link.admin-link.router-link-active {
+  color: var(--accent-purple);
+  background: rgba(168, 85, 247, 0.15);
 }
 
 .nav-icon {
