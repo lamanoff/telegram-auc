@@ -488,7 +488,7 @@ async function testAntiSnipeBasic(adminToken: string): Promise<AntiSnipeTestResu
 
 async function testAntiSnipeMultipleBids(adminToken: string): Promise<AntiSnipeTestResult> {
   console.log("\n🛡️  Тест: Множественные ставки в окне anti-snipe");
-  console.log("   Проверяем, что каждая ставка продлевает раунд...");
+  console.log("   Проверяем последовательное продление при ставках в окне...");
   
   try {
     // Create a short auction for testing
@@ -522,44 +522,58 @@ async function testAntiSnipeMultipleBids(adminToken: string): Promise<AntiSnipeT
     const timeToWait = roundEndTime - now - (ANTI_SNIPE_WINDOW_SEC * 1000) + 2000;
     
     if (timeToWait > 0) {
-      console.log(`   Ожидание ${(timeToWait / 1000).toFixed(1)}с...`);
+      console.log(`   Ожидание ${(timeToWait / 1000).toFixed(1)}с до окна anti-snipe...`);
       await sleep(timeToWait);
     }
     
-    // First bid
-    console.log(`   Первая ставка...`);
+    // First bid - should extend
+    console.log(`   Первая ставка в окне anti-snipe...`);
     await placeBid(auctionId, testUser1.token, "1.0");
     await sleep(500);
     
     auction = await getAuctionDetails(auctionId);
     const afterFirstBid = new Date(auction.roundEndsAt);
+    const firstExtension = Math.round((afterFirstBid.getTime() - originalRoundEndsAt.getTime()) / 1000);
+    console.log(`   Первое продление: ${firstExtension}с`);
     
-    // Wait a second and place second bid
-    await sleep(1000);
+    // After extension, we're now OUTSIDE the anti-snipe window again
+    // (because roundEndsAt moved forward by ANTI_SNIPE_EXTEND_SEC)
+    // This is EXPECTED behavior - the second bid will NOT extend because
+    // time remaining is now > ANTI_SNIPE_WINDOW_SEC
     
-    console.log(`   Вторая ставка...`);
+    // Wait until we're back in the anti-snipe window
+    auction = await getAuctionDetails(auctionId);
+    const newRoundEndTime = new Date(auction.roundEndsAt).getTime();
+    const timeToSecondWindow = newRoundEndTime - Date.now() - (ANTI_SNIPE_WINDOW_SEC * 1000) + 2000;
+    
+    if (timeToSecondWindow > 0 && timeToSecondWindow < 60000) {
+      console.log(`   Ожидание ${(timeToSecondWindow / 1000).toFixed(1)}с до повторного входа в окно...`);
+      await sleep(timeToSecondWindow);
+    }
+    
+    console.log(`   Вторая ставка в окне anti-snipe...`);
     await placeBid(auctionId, testUser2.token, "2.0");
     await sleep(500);
     
     auction = await getAuctionDetails(auctionId);
     const afterSecondBid = new Date(auction.roundEndsAt);
     
-    const firstExtension = Math.round((afterFirstBid.getTime() - originalRoundEndsAt.getTime()) / 1000);
     const secondExtension = Math.round((afterSecondBid.getTime() - afterFirstBid.getTime()) / 1000);
     const totalExtension = Math.round((afterSecondBid.getTime() - originalRoundEndsAt.getTime()) / 1000);
     
-    console.log(`   Первое продление: ${firstExtension}с`);
     console.log(`   Второе продление: ${secondExtension}с`);
     console.log(`   Общее продление: ${totalExtension}с`);
     
-    // Both bids should have extended the round
-    const passed = firstExtension >= ANTI_SNIPE_EXTEND_SEC - 2 && secondExtension >= ANTI_SNIPE_EXTEND_SEC - 2;
+    // First bid should have extended, second bid should also extend if we waited
+    const firstOk = firstExtension >= ANTI_SNIPE_EXTEND_SEC - 2;
+    const secondOk = secondExtension >= ANTI_SNIPE_EXTEND_SEC - 2;
+    const passed = firstOk && secondOk;
     
     return {
       testName: "Anti-Snipe Multiple Bids",
       passed,
       details: passed 
-        ? `Каждая ставка продлила раунд. Общее продление: ${totalExtension}с`
+        ? `Каждая ставка в окне продлила раунд. Общее продление: ${totalExtension}с`
         : `Продления: ${firstExtension}с и ${secondExtension}с (ожидалось ~${ANTI_SNIPE_EXTEND_SEC}с каждое)`,
       extensionSec: totalExtension,
     };
