@@ -1,0 +1,116 @@
+import http from "http";
+import express from "express";
+import cors from "cors";
+import helmet from "helmet";
+import { ZodError } from "zod";
+import { connectDb } from "./db";
+import { config } from "./config";
+import { authRoutes } from "./routes/authRoutes";
+import { userRoutes } from "./routes/userRoutes";
+import { createAuctionRoutes } from "./routes/auctionRoutes";
+import { webhookRoutes } from "./routes/webhookRoutes";
+import { adminRoutes } from "./routes/adminRoutes";
+import { HttpError } from "./utils/errors";
+import { AuctionHub } from "./ws/auctionHub";
+import { attachWebSocket } from "./ws/server";
+import { startAuctionScheduler } from "./services/auctionScheduler";
+import { createBidWorker, setBidQueueHub } from "./services/bidQueue";
+import { redis } from "./services/redis";
+import { rateLimitMiddleware } from "./utils/rateLimitGlobal";
+
+async function bootstrap() {
+  await connectDb();
+
+  const app = express();
+  
+  app.use(helmet({
+    contentSecurityPolicy: {
+      directives: {
+        defaultSrc: ["'self'"],
+        styleSrc: ["'self'", "'unsafe-inline'"],
+        scriptSrc: ["'self'"],
+        imgSrc: ["'self'", "data:", "https:"],
+      },
+    },
+    crossOriginEmbedderPolicy: false,
+  }));
+
+  const allowedOrigins = process.env.FRONTEND_URL 
+    ? process.env.FRONTEND_URL.split(',').map(o => o.trim())
+    : ['http://localhost', 'http://localhost:80', 'http://localhost:5173'];
+  
+  app.use(cors({
+    origin: (origin, callback) => {
+      if (!origin || allowedOrigins.some(o => origin.startsWith(o))) {
+        callback(null, true);
+      } else {
+        callback(new Error('Not allowed by CORS'));
+      }
+    },
+    credentials: true,
+    methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+    allowedHeaders: ['Content-Type', 'Authorization'],
+  }));
+
+  app.use(express.json({ limit: "1mb" }));
+  app.use(rateLimitMiddleware);
+  
+  app.use("/api", webhookRoutes);
+
+  app.get("/health", (_req, res) => res.json({ status: "ok" }));
+
+  app.use("/api", authRoutes);
+  app.use("/api", userRoutes);
+  app.use("/api", adminRoutes);
+
+  const hub = new AuctionHub();
+  setBidQueueHub(hub);
+  const bidWorker = createBidWorker();
+  app.use("/api/auctions", createAuctionRoutes(hub));
+
+  app.use((err: unknown, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
+    if (err instanceof ZodError) {
+      return res.status(400).json({ error: "Invalid input data" });
+    }
+    if (err instanceof HttpError) {
+      return res.status(err.status).json({ error: err.message });
+    }
+    if (err instanceof Error) {
+      // Always log errors to stderr for debugging
+      console.error(`[ERROR] ${err.message}`, err.stack?.split('\n').slice(0, 3).join('\n'));
+      
+      const isProduction = process.env.NODE_ENV === 'production';
+      return res.status(500).json({ 
+        error: isProduction ? "Internal server error" : err.message 
+      });
+    }
+    console.error('[ERROR] Unknown error:', err);
+    return res.status(500).json({ error: "Internal server error" });
+  });
+
+  const server = http.createServer(app);
+  attachWebSocket(server, hub);
+  startAuctionScheduler(hub);
+
+  server.listen(config.port, () => {
+    if (process.env.NODE_ENV !== 'production') {
+      console.log(`Server listening on ${config.port}`);
+    }
+  });
+
+  process.on("SIGTERM", async () => {
+    if (process.env.NODE_ENV !== 'production') {
+      console.log("SIGTERM received, shutting down gracefully");
+    }
+    await bidWorker.close();
+    await redis.quit();
+    server.close(() => {
+      process.exit(0);
+    });
+  });
+}
+
+bootstrap().catch((err) => {
+  console.error("Failed to start:", err instanceof Error ? err.message : "Unknown error");
+  process.exit(1);
+});
