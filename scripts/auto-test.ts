@@ -1,12 +1,177 @@
-import axios from "axios";
+import axios, { AxiosInstance } from "axios";
 import WebSocket from "ws";
+import * as readline from "readline";
 
-const API_BASE = process.env.API_BASE || "http://localhost:3000";
-const WS_BASE = process.env.WS_BASE || "ws://localhost:3000";
+// ============================================================================
+// CONFIGURATION
+// ============================================================================
 
-// Threshold for considering test successful
+// Test thresholds
 const SUCCESS_THRESHOLD = 0.9; // 90%
 const RESPONSE_TIME_THRESHOLD = 2000; // 2 seconds
+
+// Configuration (will be set interactively or from env/args)
+let API_BASE = "";
+let WS_BASE = "";
+let ADMIN_USERNAME = "";
+let ADMIN_PASSWORD = "";
+let ANTI_SNIPE_WINDOW_SEC = 30;
+let ANTI_SNIPE_EXTEND_SEC = 30;
+
+// ============================================================================
+// INTERACTIVE INPUT
+// ============================================================================
+
+function createReadlineInterface(): readline.Interface {
+  return readline.createInterface({
+    input: process.stdin,
+    output: process.stdout,
+  });
+}
+
+function question(rl: readline.Interface, prompt: string): Promise<string> {
+  return new Promise((resolve) => {
+    rl.question(prompt, (answer) => {
+      resolve(answer.trim());
+    });
+  });
+}
+
+function questionHidden(rl: readline.Interface, prompt: string): Promise<string> {
+  return new Promise((resolve) => {
+    // For password input, we'll use a simple approach
+    // Note: This won't hide the password on all terminals
+    process.stdout.write(prompt);
+    
+    const stdin = process.stdin;
+    const wasRaw = stdin.isRaw;
+    
+    if (stdin.isTTY) {
+      stdin.setRawMode(true);
+    }
+    
+    let password = "";
+    
+    const onData = (char: Buffer) => {
+      const c = char.toString("utf8");
+      
+      switch (c) {
+        case "\n":
+        case "\r":
+        case "\u0004": // Ctrl+D
+          if (stdin.isTTY) {
+            stdin.setRawMode(wasRaw ?? false);
+          }
+          stdin.removeListener("data", onData);
+          process.stdout.write("\n");
+          resolve(password);
+          break;
+        case "\u0003": // Ctrl+C
+          process.exit(1);
+          break;
+        case "\u007F": // Backspace
+          if (password.length > 0) {
+            password = password.slice(0, -1);
+            process.stdout.clearLine(0);
+            process.stdout.cursorTo(0);
+            process.stdout.write(prompt + "*".repeat(password.length));
+          }
+          break;
+        default:
+          password += c;
+          process.stdout.write("*");
+          break;
+      }
+    };
+    
+    stdin.on("data", onData);
+  });
+}
+
+async function promptForConfiguration(): Promise<void> {
+  // Check if all config is provided via environment or arguments
+  const envApiBase = process.env.API_BASE || process.argv[2];
+  const envWsBase = process.env.WS_BASE || process.argv[3];
+  const envUsername = process.env.ADMIN_USERNAME || process.argv[4];
+  const envPassword = process.env.ADMIN_PASSWORD || process.argv[5];
+  
+  // If all required params are provided, use them
+  if (envApiBase && envUsername && envPassword) {
+    API_BASE = envApiBase;
+    WS_BASE = envWsBase || envApiBase.replace(/^http/, "ws");
+    ADMIN_USERNAME = envUsername;
+    ADMIN_PASSWORD = envPassword;
+    ANTI_SNIPE_WINDOW_SEC = Number(process.env.ANTI_SNIPE_WINDOW_SEC || "30");
+    ANTI_SNIPE_EXTEND_SEC = Number(process.env.ANTI_SNIPE_EXTEND_SEC || "30");
+    return;
+  }
+  
+  console.log("═".repeat(80));
+  console.log("       🚀 НАСТРОЙКА ТЕСТИРОВАНИЯ АУКЦИОННОЙ СИСТЕМЫ");
+  console.log("═".repeat(80));
+  console.log("\n  Введите параметры подключения к серверу.\n");
+  console.log("  💡 Совет: Нажмите Enter для значения по умолчанию (в скобках)\n");
+  
+  const rl = createReadlineInterface();
+  
+  try {
+    // API URL
+    const defaultApiBase = envApiBase || "http://localhost:3000";
+    const apiBaseInput = await question(rl, `  🌐 URL сервера API [${defaultApiBase}]: `);
+    API_BASE = apiBaseInput || defaultApiBase;
+    
+    // WebSocket URL (auto-derived from API URL)
+    const defaultWsBase = API_BASE.replace(/^http/, "ws");
+    WS_BASE = defaultWsBase;
+    console.log(`  📡 WebSocket URL: ${WS_BASE}`);
+    
+    // Admin username
+    const defaultUsername = envUsername || "admin";
+    const usernameInput = await question(rl, `\n  👤 Логин администратора [${defaultUsername}]: `);
+    ADMIN_USERNAME = usernameInput || defaultUsername;
+    
+    // Admin password
+    const defaultPassword = envPassword || "admin123";
+    console.log(`  🔑 Пароль администратора [${defaultPassword.replace(/./g, "*")}]: `);
+    
+    // Use simple question for password (hidden input can be problematic in some terminals)
+    const passwordInput = await question(rl, `     (введите новый или нажмите Enter для значения по умолчанию): `);
+    ADMIN_PASSWORD = passwordInput || defaultPassword;
+    
+    // Anti-snipe settings
+    console.log("\n  ⚙️  Настройки Anti-Snipe (защита от снайпинга):");
+    
+    const defaultWindow = process.env.ANTI_SNIPE_WINDOW_SEC || "30";
+    const windowInput = await question(rl, `     Окно anti-snipe в секундах [${defaultWindow}]: `);
+    ANTI_SNIPE_WINDOW_SEC = Number(windowInput || defaultWindow);
+    
+    const defaultExtend = process.env.ANTI_SNIPE_EXTEND_SEC || "30";
+    const extendInput = await question(rl, `     Продление раунда в секундах [${defaultExtend}]: `);
+    ANTI_SNIPE_EXTEND_SEC = Number(extendInput || defaultExtend);
+    
+  } finally {
+    rl.close();
+  }
+  
+  console.log("");
+}
+
+function printConfiguration(): void {
+  console.log("═".repeat(80));
+  console.log("  🔧 КОНФИГУРАЦИЯ ТЕСТОВ");
+  console.log("═".repeat(80));
+  console.log(`  API_BASE: ${API_BASE}`);
+  console.log(`  WS_BASE: ${WS_BASE}`);
+  console.log(`  ADMIN_USERNAME: ${ADMIN_USERNAME}`);
+  console.log(`  ADMIN_PASSWORD: ${"*".repeat(ADMIN_PASSWORD.length)}`);
+  console.log(`  ANTI_SNIPE_WINDOW_SEC: ${ANTI_SNIPE_WINDOW_SEC}`);
+  console.log(`  ANTI_SNIPE_EXTEND_SEC: ${ANTI_SNIPE_EXTEND_SEC}`);
+  console.log("═".repeat(80));
+}
+
+// ============================================================================
+// TYPES
+// ============================================================================
 
 interface SystemLimits {
   maxConcurrentUsers: number;
@@ -33,30 +198,35 @@ interface TestResult {
   errors: number;
 }
 
-// MongoDB connection helper
-let mongoClient: any = null;
-
-async function getMongoClient() {
-  if (!mongoClient) {
-    const { MongoClient } = await import("mongodb");
-    const mongoUri = process.env.MONGO_URI || "mongodb://localhost:27017/auction?replicaSet=rs0&directConnection=true";
-    mongoClient = new MongoClient(mongoUri);
-    await mongoClient.connect();
-  }
-  return mongoClient;
+interface AntiSnipeTestResult {
+  testName: string;
+  passed: boolean;
+  details: string;
+  originalEndTime?: Date;
+  newEndTime?: Date;
+  extensionSec?: number;
 }
 
-async function closeMongoClient() {
-  if (mongoClient) {
-    await mongoClient.close();
-    mongoClient = null;
-  }
+// ============================================================================
+// API CLIENT
+// ============================================================================
+
+function createApiClient(token?: string): AxiosInstance {
+  return axios.create({
+    baseURL: API_BASE,
+    timeout: 10000,
+    headers: token ? { Authorization: `Bearer ${token}` } : {},
+  });
 }
+
+// ============================================================================
+// UTILITY FUNCTIONS
+// ============================================================================
 
 async function waitForService(url: string, maxAttempts = 30): Promise<boolean> {
   for (let i = 0; i < maxAttempts; i++) {
     try {
-      await axios.get(url, { timeout: 2000 });
+      await axios.get(`${url}/health`, { timeout: 2000 });
       return true;
     } catch {
       await new Promise((resolve) => setTimeout(resolve, 1000));
@@ -65,61 +235,75 @@ async function waitForService(url: string, maxAttempts = 30): Promise<boolean> {
   return false;
 }
 
-async function createAdminUser(): Promise<User> {
-  const adminToken = process.env.ADMIN_TOKEN;
-  
-  if (adminToken) {
-    try {
-      const userResponse = await axios.get(`${API_BASE}/api/profile`, {
-        headers: { Authorization: `Bearer ${adminToken}` },
-      });
-      
-      if (userResponse.data.role === "admin") {
-        return {
-          id: userResponse.data.id,
-          token: adminToken,
-          username: userResponse.data.username,
-        };
-      }
-    } catch {
-      // Token invalid, will create new admin
-    }
-  }
-  
-  const username = `admin_test_${Date.now()}`;
-  const password = "admin_test_password_123";
+async function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+// ============================================================================
+// AUTHENTICATION
+// ============================================================================
+
+async function loginAdmin(): Promise<User> {
+  console.log(`\n🔐 Вход под администратором: ${ADMIN_USERNAME}...`);
   
   try {
-    const response = await axios.post(`${API_BASE}/api/register`, {
-      username,
-      password,
+    const response = await axios.post(`${API_BASE}/api/login`, {
+      username: ADMIN_USERNAME,
+      password: ADMIN_PASSWORD,
     });
     
-    const userId = response.data.user.id;
+    if (response.data.user.role !== "admin") {
+      throw new Error(`Пользователь ${ADMIN_USERNAME} не является администратором (роль: ${response.data.user.role})`);
+    }
     
-    const client = await getMongoClient();
-    const { ObjectId } = await import("mongodb");
-    const db = client.db();
-    await db.collection("users").updateOne(
-      { _id: new ObjectId(userId) },
-      { $set: { role: "admin" } }
-    );
-    
-    console.log("✅ Роль администратора назначена");
-    
-    // Re-login to get a new token with admin role
-    const loginResponse = await axios.post(`${API_BASE}/api/login`, {
-      username,
-      password,
-    });
-    
+    console.log(`   ✅ Успешный вход как администратор`);
     return {
-      id: loginResponse.data.user.id,
-      token: loginResponse.data.token,
-      username,
+      id: response.data.user.id,
+      token: response.data.token,
+      username: response.data.user.username,
     };
   } catch (error: any) {
-    if (error.response?.status === 409) {
+    if (error.response?.status === 400) {
+      throw new Error(`Неверные учётные данные администратора: ${ADMIN_USERNAME}`);
+    }
+    throw error;
+  }
+}
+
+async function createTestUser(adminToken: string, index: number): Promise<User> {
+  const username = `test_bot_${Date.now()}_${index}`;
+  const password = `test_password_${index}`;
+  
+  try {
+    // Register user
+    const registerResponse = await axios.post(`${API_BASE}/api/register`, {
+      username,
+      password,
+    });
+    
+    const user: User = {
+      id: registerResponse.data.user.id,
+      token: registerResponse.data.token,
+      username,
+    };
+    
+    // Set balance via admin API
+    await axios.post(
+      `${API_BASE}/api/admin/users/${user.id}/balance`,
+      { currency: "TON", amount: "100000" },
+      { headers: { Authorization: `Bearer ${adminToken}` } }
+    );
+    
+    await axios.post(
+      `${API_BASE}/api/admin/users/${user.id}/balance`,
+      { currency: "USDT", amount: "100000" },
+      { headers: { Authorization: `Bearer ${adminToken}` } }
+    );
+    
+    return user;
+  } catch (error: any) {
+    if (error.response?.status === 400 && error.response?.data?.error?.includes("already taken")) {
+      // User exists, try to login
       const loginResponse = await axios.post(`${API_BASE}/api/login`, {
         username,
         password,
@@ -134,21 +318,38 @@ async function createAdminUser(): Promise<User> {
   }
 }
 
-async function createTestAuction(adminToken: string): Promise<string> {
-  const startTime = new Date(Date.now() + 3000).toISOString();
+// ============================================================================
+// AUCTION MANAGEMENT
+// ============================================================================
+
+async function createTestAuction(
+  adminToken: string, 
+  options: {
+    roundDurationSec?: number;
+    firstRoundDurationSec?: number;
+    startDelayMs?: number;
+  } = {}
+): Promise<string> {
+  const {
+    roundDurationSec = 600,
+    firstRoundDurationSec = 600,
+    startDelayMs = 3000,
+  } = options;
+  
+  const startTime = new Date(Date.now() + startDelayMs).toISOString();
   
   const response = await axios.post(
     `${API_BASE}/api/auctions`,
     {
-      title: `Limit Test Auction ${Date.now()}`,
-      description: "Finding system limits",
+      title: `Test Auction ${Date.now()}`,
+      description: "Automated test auction",
       currency: "TON",
       roundsCount: 100,
       itemsPerRound: 100,
       totalItems: 10000,
       startTime,
-      firstRoundDurationSec: 600,
-      roundDurationSec: 600,
+      firstRoundDurationSec,
+      roundDurationSec,
       minIncrement: "0.001",
       startingPrice: "0.01",
     },
@@ -160,103 +361,285 @@ async function createTestAuction(adminToken: string): Promise<string> {
   return response.data.id;
 }
 
+async function getAuctionDetails(auctionId: string, token?: string): Promise<any> {
+  const headers = token ? { Authorization: `Bearer ${token}` } : {};
+  const response = await axios.get(`${API_BASE}/api/auctions/${auctionId}`, { headers });
+  return response.data;
+}
+
 async function waitForAuctionStart(auctionId: string, maxWait = 30): Promise<boolean> {
   for (let i = 0; i < maxWait; i++) {
     try {
-      const response = await axios.get(`${API_BASE}/api/auctions/${auctionId}`);
-      if (response.data.status === "active") {
+      const details = await getAuctionDetails(auctionId);
+      if (details.status === "active") {
         return true;
       }
     } catch {
       // Ignore
     }
-    await new Promise((resolve) => setTimeout(resolve, 1000));
+    await sleep(1000);
   }
   return false;
 }
 
-const userCache: Map<number, User> = new Map();
+async function placeBid(auctionId: string, userToken: string, amount: string): Promise<any> {
+  const response = await axios.post(
+    `${API_BASE}/api/auctions/${auctionId}/bid`,
+    { amount },
+    { headers: { Authorization: `Bearer ${userToken}` }, timeout: 10000 }
+  );
+  return response.data;
+}
 
-async function getOrCreateUser(index: number): Promise<User> {
-  if (userCache.has(index)) {
-    return userCache.get(index)!;
-  }
-  
-  const username = `limit_bot_${index}_${Date.now()}`;
-  const password = `password_${index}`;
+// ============================================================================
+// ANTI-SNIPE TESTS
+// ============================================================================
+
+async function testAntiSnipeBasic(adminToken: string): Promise<AntiSnipeTestResult> {
+  console.log("\n🛡️  Тест: Базовая защита от снайпинга");
+  console.log("   Проверяем, что ставка в последние секунды продлевает раунд...");
   
   try {
-    const response = await axios.post(`${API_BASE}/api/register`, {
-      username,
-      password,
+    // Create a short auction for testing
+    const auctionId = await createTestAuction(adminToken, {
+      firstRoundDurationSec: ANTI_SNIPE_WINDOW_SEC + 5, // Just enough time to test
+      roundDurationSec: ANTI_SNIPE_WINDOW_SEC + 5,
+      startDelayMs: 2000,
     });
     
-    const user = {
-      id: response.data.user.id,
-      token: response.data.token,
-      username,
-    };
+    console.log(`   Создан тестовый аукцион: ${auctionId}`);
     
-    // Set balance - ensure the full balance structure exists
-    const client = await getMongoClient();
-    const { ObjectId } = await import("mongodb");
-    const db = client.db();
-    await db.collection("users").updateOne(
-      { _id: new ObjectId(user.id) },
-      {
-        $set: {
-          balances: {
-            TON: { total: "100000000000000", locked: "0" },  // 100000 TON
-            USDT: { total: "100000000000", locked: "0" },    // 100000 USDT
-          }
-        }
-      }
-    );
+    // Create test user
+    const testUser = await createTestUser(adminToken, 99999);
+    console.log(`   Создан тестовый пользователь: ${testUser.username}`);
     
-    userCache.set(index, user);
-    return user;
-  } catch (error: any) {
-    if (error.response?.status === 409) {
-      const loginResponse = await axios.post(`${API_BASE}/api/login`, {
-        username,
-        password,
-      });
-      const user = {
-        id: loginResponse.data.user.id,
-        token: loginResponse.data.token,
-        username,
+    // Wait for auction to start
+    const started = await waitForAuctionStart(auctionId, 10);
+    if (!started) {
+      return {
+        testName: "Anti-Snipe Basic",
+        passed: false,
+        details: "Аукцион не запустился",
       };
-      
-      // Also update balance for existing users
-      const client = await getMongoClient();
-      const { ObjectId } = await import("mongodb");
-      const db = client.db();
-      await db.collection("users").updateOne(
-        { _id: new ObjectId(user.id) },
-        {
-          $set: {
-            balances: {
-              TON: { total: "100000000000000", locked: "0" },
-              USDT: { total: "100000000000", locked: "0" },
-            }
-          }
-        }
-      );
-      
-      userCache.set(index, user);
-      return user;
     }
-    throw error;
+    
+    // Get initial auction state
+    let auction = await getAuctionDetails(auctionId);
+    const originalRoundEndsAt = new Date(auction.roundEndsAt);
+    console.log(`   Раунд заканчивается: ${originalRoundEndsAt.toISOString()}`);
+    
+    // Calculate how long to wait to be in the anti-snipe window
+    const now = Date.now();
+    const roundEndTime = originalRoundEndsAt.getTime();
+    const timeToWait = roundEndTime - now - (ANTI_SNIPE_WINDOW_SEC * 1000) + 2000; // Enter window 2 seconds in
+    
+    if (timeToWait > 0) {
+      console.log(`   Ожидание ${(timeToWait / 1000).toFixed(1)}с до входа в окно anti-snipe...`);
+      await sleep(timeToWait);
+    }
+    
+    // Get time remaining before bid
+    const timeBeforeBid = originalRoundEndsAt.getTime() - Date.now();
+    console.log(`   Осталось до конца раунда: ${(timeBeforeBid / 1000).toFixed(1)}с`);
+    
+    // Place a bid in the anti-snipe window
+    console.log(`   Делаем ставку в окне anti-snipe...`);
+    await placeBid(auctionId, testUser.token, "1.0");
+    
+    // Wait a bit for the bid to be processed
+    await sleep(500);
+    
+    // Check if round was extended
+    auction = await getAuctionDetails(auctionId);
+    const newRoundEndsAt = new Date(auction.roundEndsAt);
+    
+    const extensionMs = newRoundEndsAt.getTime() - originalRoundEndsAt.getTime();
+    const extensionSec = Math.round(extensionMs / 1000);
+    
+    console.log(`   Новое время окончания: ${newRoundEndsAt.toISOString()}`);
+    console.log(`   Продление: ${extensionSec}с (ожидалось: ${ANTI_SNIPE_EXTEND_SEC}с)`);
+    
+    // Allow some tolerance (±2 seconds)
+    const passed = extensionSec >= ANTI_SNIPE_EXTEND_SEC - 2 && extensionSec <= ANTI_SNIPE_EXTEND_SEC + 2;
+    
+    return {
+      testName: "Anti-Snipe Basic",
+      passed,
+      details: passed 
+        ? `Раунд продлён на ${extensionSec}с как ожидалось` 
+        : `Ожидалось продление на ${ANTI_SNIPE_EXTEND_SEC}с, получено ${extensionSec}с`,
+      originalEndTime: originalRoundEndsAt,
+      newEndTime: newRoundEndsAt,
+      extensionSec,
+    };
+  } catch (error: any) {
+    return {
+      testName: "Anti-Snipe Basic",
+      passed: false,
+      details: `Ошибка: ${error.response?.data?.error || error.message}`,
+    };
   }
 }
 
-// Test WebSocket connections limit
-async function testWebSocketLimit(): Promise<{ limit: number; results: TestResult[] }> {
+async function testAntiSnipeMultipleBids(adminToken: string): Promise<AntiSnipeTestResult> {
+  console.log("\n🛡️  Тест: Множественные ставки в окне anti-snipe");
+  console.log("   Проверяем, что каждая ставка продлевает раунд...");
+  
+  try {
+    // Create a short auction for testing
+    const auctionId = await createTestAuction(adminToken, {
+      firstRoundDurationSec: ANTI_SNIPE_WINDOW_SEC + 10,
+      roundDurationSec: ANTI_SNIPE_WINDOW_SEC + 10,
+      startDelayMs: 2000,
+    });
+    
+    // Create test users
+    const testUser1 = await createTestUser(adminToken, 88881);
+    const testUser2 = await createTestUser(adminToken, 88882);
+    
+    // Wait for auction to start
+    const started = await waitForAuctionStart(auctionId, 10);
+    if (!started) {
+      return {
+        testName: "Anti-Snipe Multiple Bids",
+        passed: false,
+        details: "Аукцион не запустился",
+      };
+    }
+    
+    // Get initial state
+    let auction = await getAuctionDetails(auctionId);
+    const originalRoundEndsAt = new Date(auction.roundEndsAt);
+    
+    // Wait to enter anti-snipe window
+    const now = Date.now();
+    const roundEndTime = originalRoundEndsAt.getTime();
+    const timeToWait = roundEndTime - now - (ANTI_SNIPE_WINDOW_SEC * 1000) + 2000;
+    
+    if (timeToWait > 0) {
+      console.log(`   Ожидание ${(timeToWait / 1000).toFixed(1)}с...`);
+      await sleep(timeToWait);
+    }
+    
+    // First bid
+    console.log(`   Первая ставка...`);
+    await placeBid(auctionId, testUser1.token, "1.0");
+    await sleep(500);
+    
+    auction = await getAuctionDetails(auctionId);
+    const afterFirstBid = new Date(auction.roundEndsAt);
+    
+    // Wait a second and place second bid
+    await sleep(1000);
+    
+    console.log(`   Вторая ставка...`);
+    await placeBid(auctionId, testUser2.token, "2.0");
+    await sleep(500);
+    
+    auction = await getAuctionDetails(auctionId);
+    const afterSecondBid = new Date(auction.roundEndsAt);
+    
+    const firstExtension = Math.round((afterFirstBid.getTime() - originalRoundEndsAt.getTime()) / 1000);
+    const secondExtension = Math.round((afterSecondBid.getTime() - afterFirstBid.getTime()) / 1000);
+    const totalExtension = Math.round((afterSecondBid.getTime() - originalRoundEndsAt.getTime()) / 1000);
+    
+    console.log(`   Первое продление: ${firstExtension}с`);
+    console.log(`   Второе продление: ${secondExtension}с`);
+    console.log(`   Общее продление: ${totalExtension}с`);
+    
+    // Both bids should have extended the round
+    const passed = firstExtension >= ANTI_SNIPE_EXTEND_SEC - 2 && secondExtension >= ANTI_SNIPE_EXTEND_SEC - 2;
+    
+    return {
+      testName: "Anti-Snipe Multiple Bids",
+      passed,
+      details: passed 
+        ? `Каждая ставка продлила раунд. Общее продление: ${totalExtension}с`
+        : `Продления: ${firstExtension}с и ${secondExtension}с (ожидалось ~${ANTI_SNIPE_EXTEND_SEC}с каждое)`,
+      extensionSec: totalExtension,
+    };
+  } catch (error: any) {
+    return {
+      testName: "Anti-Snipe Multiple Bids",
+      passed: false,
+      details: `Ошибка: ${error.response?.data?.error || error.message}`,
+    };
+  }
+}
+
+async function testAntiSnipeOutsideWindow(adminToken: string): Promise<AntiSnipeTestResult> {
+  console.log("\n🛡️  Тест: Ставка вне окна anti-snipe");
+  console.log("   Проверяем, что ставка ВНЕ окна не продлевает раунд...");
+  
+  try {
+    // Create auction with longer duration
+    const auctionId = await createTestAuction(adminToken, {
+      firstRoundDurationSec: ANTI_SNIPE_WINDOW_SEC + 60, // 60 seconds before anti-snipe window
+      roundDurationSec: ANTI_SNIPE_WINDOW_SEC + 60,
+      startDelayMs: 2000,
+    });
+    
+    const testUser = await createTestUser(adminToken, 77777);
+    
+    const started = await waitForAuctionStart(auctionId, 10);
+    if (!started) {
+      return {
+        testName: "Anti-Snipe Outside Window",
+        passed: false,
+        details: "Аукцион не запустился",
+      };
+    }
+    
+    // Get initial state - we're well outside the anti-snipe window
+    let auction = await getAuctionDetails(auctionId);
+    const originalRoundEndsAt = new Date(auction.roundEndsAt);
+    
+    const timeRemaining = (originalRoundEndsAt.getTime() - Date.now()) / 1000;
+    console.log(`   Осталось до конца раунда: ${timeRemaining.toFixed(1)}с (окно anti-snipe: ${ANTI_SNIPE_WINDOW_SEC}с)`);
+    
+    // Place a bid outside the anti-snipe window
+    console.log(`   Делаем ставку ВНЕ окна anti-snipe...`);
+    await placeBid(auctionId, testUser.token, "1.0");
+    await sleep(500);
+    
+    // Check that round was NOT extended
+    auction = await getAuctionDetails(auctionId);
+    const newRoundEndsAt = new Date(auction.roundEndsAt);
+    
+    const extensionMs = newRoundEndsAt.getTime() - originalRoundEndsAt.getTime();
+    const extensionSec = Math.round(extensionMs / 1000);
+    
+    console.log(`   Продление: ${extensionSec}с (ожидалось: 0с)`);
+    
+    const passed = Math.abs(extensionSec) <= 1; // Allow 1 second tolerance for timing
+    
+    return {
+      testName: "Anti-Snipe Outside Window",
+      passed,
+      details: passed 
+        ? "Раунд не продлён, как и ожидалось"
+        : `Неожиданное продление на ${extensionSec}с`,
+      extensionSec,
+    };
+  } catch (error: any) {
+    return {
+      testName: "Anti-Snipe Outside Window",
+      passed: false,
+      details: `Ошибка: ${error.response?.data?.error || error.message}`,
+    };
+  }
+}
+
+// ============================================================================
+// PERFORMANCE TESTS
+// ============================================================================
+
+async function testWebSocketLimit(auctionId: string): Promise<{ limit: number; results: TestResult[] }> {
   console.log("\n🔌 Поиск предела WebSocket подключений...");
   
   const results: TestResult[] = [];
   let currentLimit = 0;
-  const levels = [10, 25, 50, 100, 150, 200, 300, 500, 750, 1000];
+  const levels = [10, 25, 50, 100, 150, 200, 300, 500];
   
   for (const level of levels) {
     console.log(`  Тестируем ${level} подключений...`);
@@ -270,7 +653,7 @@ async function testWebSocketLimit(): Promise<{ limit: number; results: TestResul
     for (let i = 0; i < level; i++) {
       const promise = new Promise<void>((resolve) => {
         try {
-          const ws = new WebSocket(`${WS_BASE}/ws?auctionId=000000000000000000000000&token=test_${i}`);
+          const ws = new WebSocket(`${WS_BASE}/ws?auctionId=${auctionId}&token=test_${i}`);
           
           const timeout = setTimeout(() => {
             failed++;
@@ -315,9 +698,7 @@ async function testWebSocketLimit(): Promise<{ limit: number; results: TestResul
     
     // Close all connections
     connections.forEach((ws) => {
-      try {
-        ws.close();
-      } catch {}
+      try { ws.close(); } catch {}
     });
     
     if (successRate >= SUCCESS_THRESHOLD) {
@@ -327,19 +708,18 @@ async function testWebSocketLimit(): Promise<{ limit: number; results: TestResul
       break;
     }
     
-    await new Promise((resolve) => setTimeout(resolve, 1000));
+    await sleep(1000);
   }
   
   return { limit: currentLimit, results };
 }
 
-// Test concurrent users creating/registering
 async function testConcurrentUsersLimit(): Promise<{ limit: number; results: TestResult[] }> {
   console.log("\n👥 Поиск предела одновременной регистрации...");
   
   const results: TestResult[] = [];
   let currentLimit = 0;
-  const levels = [5, 10, 20, 30, 50, 75, 100, 150, 200];
+  const levels = [5, 10, 20, 30, 50, 75, 100];
   
   for (const level of levels) {
     console.log(`  Тестируем ${level} одновременных регистраций...`);
@@ -358,7 +738,7 @@ async function testConcurrentUsersLimit(): Promise<{ limit: number; results: Tes
         try {
           await axios.post(`${API_BASE}/api/register`, {
             username: `concurrent_${baseIndex}_${i}`,
-            password: `password_${i}`,
+            password: `password_${i}_secure`,
           }, { timeout: 10000 });
           successful++;
           responseTimes.push(Date.now() - reqStart);
@@ -387,7 +767,7 @@ async function testConcurrentUsersLimit(): Promise<{ limit: number; results: Tes
       errors: failed,
     });
     
-    console.log(`    Успешно: ${successful}/${level} (${(successRate * 100).toFixed(1)}%), Avg: ${avgTime.toFixed(0)}ms, RPS: ${(level / totalTime).toFixed(1)}`);
+    console.log(`    Успешно: ${successful}/${level} (${(successRate * 100).toFixed(1)}%), Avg: ${avgTime.toFixed(0)}ms`);
     
     if (successRate >= SUCCESS_THRESHOLD && p95Time < RESPONSE_TIME_THRESHOLD) {
       currentLimit = level;
@@ -396,14 +776,13 @@ async function testConcurrentUsersLimit(): Promise<{ limit: number; results: Tes
       break;
     }
     
-    await new Promise((resolve) => setTimeout(resolve, 500));
+    await sleep(500);
   }
   
   return { limit: currentLimit, results };
 }
 
-// Test RPS with pre-created users
-async function testRPSLimitWithUsers(auctionId: string, users: User[]): Promise<{ limit: number; sustainedRPS: number; results: TestResult[] }> {
+async function testRPSLimit(auctionId: string, users: User[]): Promise<{ limit: number; sustainedRPS: number; results: TestResult[] }> {
   console.log("\n⚡ Поиск предела RPS (запросов в секунду)...");
   
   const results: TestResult[] = [];
@@ -415,34 +794,17 @@ async function testRPSLimitWithUsers(auctionId: string, users: User[]): Promise<
     return { limit: 0, sustainedRPS: 0, results: [] };
   }
   
-  console.log(`  Используется ${users.length} предварительно созданных пользователей`);
-  
   // Test single bid first
   console.log("  Проверка одиночной ставки...");
-  const testUser = users[0];
   try {
-    await axios.post(
-      `${API_BASE}/api/auctions/${auctionId}/bid`,
-      { amount: "1.0" },
-      {
-        headers: { Authorization: `Bearer ${testUser.token}` },
-        timeout: 10000,
-      }
-    );
+    await placeBid(auctionId, users[0].token, "1.0");
     console.log(`  ✅ Тестовая ставка успешна`);
   } catch (error: any) {
-    const errMsg = error.response?.data?.error || error.message;
-    console.log(`  ❌ Тестовая ставка не прошла: ${errMsg}`);
-    
-    try {
-      const auctionInfo = await axios.get(`${API_BASE}/api/auctions/${auctionId}`);
-      console.log(`     Аукцион: статус=${auctionInfo.data.status}, мин.ставка=${auctionInfo.data.currentMinBid}, валюта=${auctionInfo.data.currency}`);
-    } catch {}
-    
+    console.log(`  ❌ Тестовая ставка не прошла: ${error.response?.data?.error || error.message}`);
     return { limit: 0, sustainedRPS: 0, results: [] };
   }
   
-  const targetRPS = [10, 25, 50, 100, 150, 200, 300, 500];
+  const targetRPS = [10, 25, 50, 100, 150, 200];
   
   for (const rps of targetRPS) {
     console.log(`  Тестируем ${rps} RPS...`);
@@ -467,14 +829,7 @@ async function testRPSLimitWithUsers(auctionId: string, users: User[]): Promise<
       const promise = (async () => {
         const reqStart = Date.now();
         try {
-          await axios.post(
-            `${API_BASE}/api/auctions/${auctionId}/bid`,
-            { amount },
-            {
-              headers: { Authorization: `Bearer ${user.token}` },
-              timeout: 5000,
-            }
-          );
+          await placeBid(auctionId, user.token, amount);
           successful++;
         } catch (error: any) {
           failed++;
@@ -494,7 +849,7 @@ async function testRPSLimitWithUsers(auctionId: string, users: User[]): Promise<
         const elapsed = Date.now() - startTime;
         const targetElapsed = (i / rps) * 1000;
         if (targetElapsed > elapsed) {
-          await new Promise((resolve) => setTimeout(resolve, targetElapsed - elapsed));
+          await sleep(targetElapsed - elapsed);
         }
       }
     }
@@ -530,19 +885,18 @@ async function testRPSLimitWithUsers(auctionId: string, users: User[]): Promise<
       break;
     }
     
-    await new Promise((resolve) => setTimeout(resolve, 1000));
+    await sleep(1000);
   }
   
   return { limit: currentLimit, sustainedRPS, results };
 }
 
-// Test concurrent bidders with pre-created users
-async function testConcurrentBiddersLimitWithUsers(auctionId: string, users: User[]): Promise<{ limit: number; results: TestResult[] }> {
+async function testConcurrentBiddersLimit(auctionId: string, users: User[]): Promise<{ limit: number; results: TestResult[] }> {
   console.log("\n🎯 Поиск предела одновременно делающих ставки...");
   
   const results: TestResult[] = [];
   let currentLimit = 0;
-  const levels = [5, 10, 20, 30, 50, 75, 100, 150, 200, 300];
+  const levels = [5, 10, 20, 30, 50, 75, 100];
   
   for (const level of levels) {
     if (users.length < level) {
@@ -565,14 +919,7 @@ async function testConcurrentBiddersLimitWithUsers(auctionId: string, users: Use
       const bidAmount = baseBid + index * 0.1 + Math.random() * 0.05;
       const reqStart = Date.now();
       try {
-        await axios.post(
-          `${API_BASE}/api/auctions/${auctionId}/bid`,
-          { amount: bidAmount.toFixed(4) },
-          {
-            headers: { Authorization: `Bearer ${user.token}` },
-            timeout: 10000,
-          }
-        );
+        await placeBid(auctionId, user.token, bidAmount.toFixed(4));
         successful++;
         responseTimes.push(Date.now() - reqStart);
       } catch (error: any) {
@@ -613,267 +960,40 @@ async function testConcurrentBiddersLimitWithUsers(auctionId: string, users: Use
       break;
     }
     
-    await new Promise((resolve) => setTimeout(resolve, 1000));
+    await sleep(1000);
   }
   
   return { limit: currentLimit, results };
 }
 
-// Test RPS (requests per second) limit - old version
-async function testRPSLimit(auctionId: string): Promise<{ limit: number; sustainedRPS: number; results: TestResult[] }> {
-  console.log("\n⚡ Поиск предела RPS (запросов в секунду)...");
+// ============================================================================
+// REPORTS
+// ============================================================================
+
+function printAntiSnipeReport(results: AntiSnipeTestResult[]) {
+  console.log("\n" + "═".repeat(80));
+  console.log("                    🛡️ ОТЧЁТ О ТЕСТАХ ANTI-SNIPE 🛡️");
+  console.log("═".repeat(80));
   
-  const results: TestResult[] = [];
-  let currentLimit = 0;
-  let sustainedRPS = 0;
+  let passed = 0;
+  let failed = 0;
   
-  // Create users for testing
-  console.log("  Подготовка пользователей...");
-  const users: User[] = [];
-  for (let i = 0; i < 100; i++) {
-    try {
-      const user = await getOrCreateUser(i + 50000);
-      users.push(user);
-    } catch {
-      // Ignore
+  for (const result of results) {
+    const icon = result.passed ? "✅" : "❌";
+    console.log(`\n  ${icon} ${result.testName}`);
+    console.log(`     ${result.details}`);
+    if (result.extensionSec !== undefined) {
+      console.log(`     Продление раунда: ${result.extensionSec}с`);
     }
-  }
-  console.log(`  Создано ${users.length} пользователей`);
-  
-  // Verify balance was set
-  if (users.length > 0) {
-    try {
-      const client = await getMongoClient();
-      const { ObjectId } = await import("mongodb");
-      const db = client.db();
-      const dbUser = await db.collection("users").findOne({ _id: new ObjectId(users[0].id) });
-      if (dbUser?.balances?.TON?.total) {
-        console.log(`  Баланс пользователя: ${dbUser.balances.TON.total} (nanoTON)`);
-      } else {
-        console.log(`  ⚠️ Баланс не установлен! Структура: ${JSON.stringify(dbUser?.balances)}`);
-      }
-    } catch (e: any) {
-      console.log(`  ⚠️ Ошибка проверки баланса: ${e.message}`);
-    }
+    if (result.passed) passed++; else failed++;
   }
   
-  // Test single bid first to check if it works
-  console.log("  Проверка одиночной ставки...");
-  const testUser = users[0];
-  try {
-    const testResponse = await axios.post(
-      `${API_BASE}/api/auctions/${auctionId}/bid`,
-      { amount: "1.0" },
-      {
-        headers: { Authorization: `Bearer ${testUser.token}` },
-        timeout: 10000,
-      }
-    );
-    console.log(`  ✅ Тестовая ставка успешна`);
-  } catch (error: any) {
-    const errMsg = error.response?.data?.error || error.message;
-    console.log(`  ❌ Тестовая ставка не прошла: ${errMsg}`);
-    console.log(`     Проверьте баланс пользователя и настройки аукциона`);
-    
-    // Try to get more info
-    try {
-      const auctionInfo = await axios.get(`${API_BASE}/api/auctions/${auctionId}`);
-      console.log(`     Аукцион: статус=${auctionInfo.data.status}, мин.ставка=${auctionInfo.data.currentMinBid}, валюта=${auctionInfo.data.currency}`);
-    } catch {}
-    
-    return { limit: 0, sustainedRPS: 0, results: [] };
-  }
-  
-  const targetRPS = [10, 25, 50, 100, 150, 200, 300, 500, 750, 1000];
-  
-  for (const rps of targetRPS) {
-    console.log(`  Тестируем ${rps} RPS...`);
-    
-    const testDuration = 5; // seconds
-    const totalRequests = rps * testDuration;
-    
-    let successful = 0;
-    let failed = 0;
-    let firstError = "";
-    const responseTimes: number[] = [];
-    const startTime = Date.now();
-    
-    const promises: Promise<void>[] = [];
-    let bidAmount = 1.0 + Math.random() * 10;
-    
-    for (let i = 0; i < totalRequests; i++) {
-      const user = users[i % users.length];
-      bidAmount += 0.01 + Math.random() * 0.01;
-      const amount = bidAmount.toFixed(4);
-      
-      const promise = (async () => {
-        const reqStart = Date.now();
-        try {
-          await axios.post(
-            `${API_BASE}/api/auctions/${auctionId}/bid`,
-            { amount },
-            {
-              headers: { Authorization: `Bearer ${user.token}` },
-              timeout: 5000,
-            }
-          );
-          successful++;
-        } catch (error: any) {
-          failed++;
-          if (!firstError) {
-            firstError = error.response?.data?.error || error.message;
-          }
-        }
-        responseTimes.push(Date.now() - reqStart);
-      })();
-      
-      promises.push(promise);
-      
-      // Control rate
-      if (i > 0 && i % rps === 0) {
-        await Promise.all(promises);
-        promises.length = 0;
-        
-        const elapsed = Date.now() - startTime;
-        const targetElapsed = (i / rps) * 1000;
-        if (targetElapsed > elapsed) {
-          await new Promise((resolve) => setTimeout(resolve, targetElapsed - elapsed));
-        }
-      }
-    }
-    
-    await Promise.all(promises);
-    
-    const totalTime = (Date.now() - startTime) / 1000;
-    const actualRPS = (successful + failed) / totalTime;
-    const successRate = successful / (successful + failed);
-    const sortedTimes = [...responseTimes].sort((a, b) => a - b);
-    const avgTime = responseTimes.length > 0 ? responseTimes.reduce((a, b) => a + b, 0) / responseTimes.length : 0;
-    const p95Time = sortedTimes[Math.floor(sortedTimes.length * 0.95)] || 0;
-    
-    results.push({
-      level: rps,
-      successRate,
-      avgResponseTime: avgTime,
-      p95ResponseTime: p95Time,
-      rps: actualRPS,
-      errors: failed,
-    });
-    
-    console.log(`    Успешно: ${successful}/${successful + failed} (${(successRate * 100).toFixed(1)}%), Actual RPS: ${actualRPS.toFixed(1)}, Avg: ${avgTime.toFixed(0)}ms`);
-    if (firstError && successRate < SUCCESS_THRESHOLD) {
-      console.log(`    Первая ошибка: ${firstError}`);
-    }
-    
-    if (successRate >= SUCCESS_THRESHOLD && p95Time < RESPONSE_TIME_THRESHOLD) {
-      currentLimit = rps;
-      sustainedRPS = actualRPS;
-    } else {
-      console.log(`    ⚠️ Предел RPS достигнут при ${rps}`);
-      break;
-    }
-    
-    await new Promise((resolve) => setTimeout(resolve, 1000));
-  }
-  
-  return { limit: currentLimit, sustainedRPS, results };
+  console.log("\n" + "─".repeat(80));
+  console.log(`  Итого: ${passed} пройдено, ${failed} провалено`);
+  console.log("═".repeat(80));
 }
 
-// Test concurrent bidders limit
-async function testConcurrentBiddersLimit(auctionId: string): Promise<{ limit: number; results: TestResult[] }> {
-  console.log("\n🎯 Поиск предела одновременно делающих ставки...");
-  
-  const results: TestResult[] = [];
-  let currentLimit = 0;
-  const levels = [5, 10, 20, 30, 50, 75, 100, 150, 200, 300];
-  
-  for (const level of levels) {
-    console.log(`  Тестируем ${level} одновременных ставок...`);
-    
-    // Create users
-    const users: User[] = [];
-    for (let i = 0; i < level; i++) {
-      try {
-        const user = await getOrCreateUser(i + 100000 + level * 1000);
-        users.push(user);
-      } catch {
-        // Ignore
-      }
-    }
-    
-    if (users.length < level * 0.8) {
-      console.log(`    ⚠️ Не удалось создать достаточно пользователей`);
-      break;
-    }
-    
-    const startTime = Date.now();
-    let successful = 0;
-    let failed = 0;
-    let firstError = "";
-    const responseTimes: number[] = [];
-    
-    // Use higher base bid to ensure uniqueness
-    const baseBid = 100 + Math.random() * 100;
-    
-    const promises = users.map(async (user, index) => {
-      const bidAmount = baseBid + index * 0.1 + Math.random() * 0.05;
-      const reqStart = Date.now();
-      try {
-        await axios.post(
-          `${API_BASE}/api/auctions/${auctionId}/bid`,
-          { amount: bidAmount.toFixed(4) },
-          {
-            headers: { Authorization: `Bearer ${user.token}` },
-            timeout: 10000,
-          }
-        );
-        successful++;
-        responseTimes.push(Date.now() - reqStart);
-      } catch (error: any) {
-        failed++;
-        responseTimes.push(Date.now() - reqStart);
-        if (!firstError) {
-          firstError = error.response?.data?.error || error.message;
-        }
-      }
-    });
-    
-    await Promise.all(promises);
-    
-    const totalTime = (Date.now() - startTime) / 1000;
-    const successRate = successful / users.length;
-    const sortedTimes = [...responseTimes].sort((a, b) => a - b);
-    const avgTime = responseTimes.length > 0 ? responseTimes.reduce((a, b) => a + b, 0) / responseTimes.length : 0;
-    const p95Time = sortedTimes[Math.floor(sortedTimes.length * 0.95)] || 0;
-    
-    results.push({
-      level,
-      successRate,
-      avgResponseTime: avgTime,
-      p95ResponseTime: p95Time,
-      rps: users.length / totalTime,
-      errors: failed,
-    });
-    
-    console.log(`    Успешно: ${successful}/${users.length} (${(successRate * 100).toFixed(1)}%), Avg: ${avgTime.toFixed(0)}ms`);
-    if (firstError && successRate < SUCCESS_THRESHOLD) {
-      console.log(`    Первая ошибка: ${firstError}`);
-    }
-    
-    if (successRate >= SUCCESS_THRESHOLD && p95Time < RESPONSE_TIME_THRESHOLD) {
-      currentLimit = level;
-    } else {
-      console.log(`    ⚠️ Предел достигнут при ${level} одновременных ставках`);
-      break;
-    }
-    
-    await new Promise((resolve) => setTimeout(resolve, 1000));
-  }
-  
-  return { limit: currentLimit, results };
-}
-
-function printLimitsReport(limits: SystemLimits, testResults: {
+function printPerformanceReport(limits: SystemLimits, testResults: {
   wsResults: TestResult[];
   userResults: TestResult[];
   rpsResults: TestResult[];
@@ -900,135 +1020,144 @@ function printLimitsReport(limits: SystemLimits, testResults: {
   console.log(`│  P95 время ответа:                  ${limits.p95ResponseTimeAtLimit.toFixed(0).padStart(6)} ms                            │`);
   console.log("└────────────────────────────────────────────────────────────────────────────┘");
   
-  // Detailed results for each test
-  console.log("\n📊 ДЕТАЛЬНЫЕ РЕЗУЛЬТАТЫ ТЕСТОВ:");
+  console.log("\n📊 ДЕТАЛЬНЫЕ РЕЗУЛЬТАТЫ:");
   
-  console.log("\n  WebSocket подключения:");
-  console.log("  ┌─────────┬────────────┬─────────┐");
-  console.log("  │ Уровень │ Успешность │  Ошибки │");
-  console.log("  ├─────────┼────────────┼─────────┤");
-  for (const r of testResults.wsResults) {
-    console.log(`  │ ${String(r.level).padStart(7)} │ ${(r.successRate * 100).toFixed(1).padStart(9)}% │ ${String(r.errors).padStart(7)} │`);
+  if (testResults.wsResults.length > 0) {
+    console.log("\n  WebSocket подключения:");
+    console.log("  ┌─────────┬────────────┬─────────┐");
+    console.log("  │ Уровень │ Успешность │  Ошибки │");
+    console.log("  ├─────────┼────────────┼─────────┤");
+    for (const r of testResults.wsResults) {
+      console.log(`  │ ${String(r.level).padStart(7)} │ ${(r.successRate * 100).toFixed(1).padStart(9)}% │ ${String(r.errors).padStart(7)} │`);
+    }
+    console.log("  └─────────┴────────────┴─────────┘");
   }
-  console.log("  └─────────┴────────────┴─────────┘");
   
-  console.log("\n  RPS тест:");
-  console.log("  ┌─────────┬────────────┬────────────┬──────────┐");
-  console.log("  │   RPS   │ Успешность │  Avg (ms)  │ P95 (ms) │");
-  console.log("  ├─────────┼────────────┼────────────┼──────────┤");
-  for (const r of testResults.rpsResults) {
-    console.log(`  │ ${String(r.level).padStart(7)} │ ${(r.successRate * 100).toFixed(1).padStart(9)}% │ ${r.avgResponseTime.toFixed(0).padStart(10)} │ ${r.p95ResponseTime.toFixed(0).padStart(8)} │`);
+  if (testResults.rpsResults.length > 0) {
+    console.log("\n  RPS тест:");
+    console.log("  ┌─────────┬────────────┬────────────┬──────────┐");
+    console.log("  │   RPS   │ Успешность │  Avg (ms)  │ P95 (ms) │");
+    console.log("  ├─────────┼────────────┼────────────┼──────────┤");
+    for (const r of testResults.rpsResults) {
+      console.log(`  │ ${String(r.level).padStart(7)} │ ${(r.successRate * 100).toFixed(1).padStart(9)}% │ ${r.avgResponseTime.toFixed(0).padStart(10)} │ ${r.p95ResponseTime.toFixed(0).padStart(8)} │`);
+    }
+    console.log("  └─────────┴────────────┴────────────┴──────────┘");
   }
-  console.log("  └─────────┴────────────┴────────────┴──────────┘");
   
-  console.log("\n  Одновременные ставки:");
-  console.log("  ┌─────────┬────────────┬────────────┬──────────┐");
-  console.log("  │ Ставки  │ Успешность │  Avg (ms)  │ P95 (ms) │");
-  console.log("  ├─────────┼────────────┼────────────┼──────────┤");
-  for (const r of testResults.bidderResults) {
-    console.log(`  │ ${String(r.level).padStart(7)} │ ${(r.successRate * 100).toFixed(1).padStart(9)}% │ ${r.avgResponseTime.toFixed(0).padStart(10)} │ ${r.p95ResponseTime.toFixed(0).padStart(8)} │`);
-  }
-  console.log("  └─────────┴────────────┴────────────┴──────────┘");
-  
-  // Recommendations
   console.log("\n💡 РЕКОМЕНДАЦИИ:");
   
   if (limits.maxWebSocketConnections >= 500) {
     console.log("  ✅ WebSocket: Отличная масштабируемость (500+ подключений)");
   } else if (limits.maxWebSocketConnections >= 100) {
-    console.log("  ⚠️  WebSocket: Средняя масштабируемость, рассмотрите использование Redis PubSub");
+    console.log("  ⚠️  WebSocket: Средняя масштабируемость");
   } else {
-    console.log("  ❌ WebSocket: Низкая масштабируемость, требуется оптимизация");
+    console.log("  ❌ WebSocket: Низкая масштабируемость");
   }
   
   if (limits.sustainedRPS >= 100) {
-    console.log("  ✅ RPS: Высокая пропускная способность (100+ RPS)");
+    console.log("  ✅ RPS: Высокая пропускная способность");
   } else if (limits.sustainedRPS >= 50) {
-    console.log("  ⚠️  RPS: Средняя пропускная способность, рассмотрите кэширование");
+    console.log("  ⚠️  RPS: Средняя пропускная способность");
   } else {
-    console.log("  ❌ RPS: Низкая пропускная способность, требуется оптимизация БД");
-  }
-  
-  if (limits.maxConcurrentBidders >= 100) {
-    console.log("  ✅ Ставки: Система выдерживает высокую конкуренцию");
-  } else if (limits.maxConcurrentBidders >= 50) {
-    console.log("  ⚠️  Ставки: Умеренная конкурентоспособность");
-  } else {
-    console.log("  ❌ Ставки: Низкая конкурентоспособность, проверьте блокировки БД");
-  }
-  
-  if (limits.p95ResponseTimeAtLimit <= 500) {
-    console.log("  ✅ Латентность: Отличное время отклика");
-  } else if (limits.p95ResponseTimeAtLimit <= 1000) {
-    console.log("  ⚠️  Латентность: Приемлемое время отклика");
-  } else {
-    console.log("  ❌ Латентность: Высокое время отклика, требуется оптимизация");
+    console.log("  ❌ RPS: Низкая пропускная способность");
   }
   
   console.log("\n" + "═".repeat(80));
-  console.log(`  Тестирование завершено: ${new Date().toLocaleString()}`);
-  console.log("═".repeat(80) + "\n");
 }
 
+// ============================================================================
+// MAIN
+// ============================================================================
+
 async function main() {
-  console.log("═".repeat(80));
-  console.log("       🚀 АВТОМАТИЧЕСКИЙ ПОИСК ПРЕДЕЛОВ СИСТЕМЫ 🚀");
+  // Interactive configuration
+  await promptForConfiguration();
+  printConfiguration();
+  
+  console.log("\n" + "═".repeat(80));
+  console.log("       🚀 АВТОМАТИЧЕСКОЕ ТЕСТИРОВАНИЕ АУКЦИОННОЙ СИСТЕМЫ 🚀");
   console.log("═".repeat(80));
   console.log(`\n  Порог успешности: ${SUCCESS_THRESHOLD * 100}%`);
   console.log(`  Порог времени ответа: ${RESPONSE_TIME_THRESHOLD}ms`);
   
+  // Step 1: Check service availability
   console.log("\n1️⃣  Проверка доступности сервисов...");
-  const apiAvailable = await waitForService(`${API_BASE}/health`);
+  const apiAvailable = await waitForService(API_BASE);
   if (!apiAvailable) {
-    console.error("❌ API недоступен. Запустите docker-compose up -d");
+    console.error(`❌ API недоступен по адресу ${API_BASE}`);
     process.exit(1);
   }
   console.log("   ✅ API доступен");
   
-  console.log("\n2️⃣  Создание администратора...");
-  const admin = await createAdminUser();
-  console.log(`   ✅ Администратор: ${admin.username}`);
+  // Step 2: Login as admin
+  console.log("\n2️⃣  Авторизация...");
+  let admin: User;
+  try {
+    admin = await loginAdmin();
+  } catch (error: any) {
+    console.error(`❌ Ошибка авторизации: ${error.message}`);
+    process.exit(1);
+  }
   
-  console.log("\n3️⃣  Создание тестового аукциона...");
-  const auctionId = await createTestAuction(admin.token);
-  console.log(`   ✅ Аукцион создан: ${auctionId}`);
+  // Step 3: Run Anti-Snipe tests
+  console.log("\n" + "─".repeat(80));
+  console.log("                    ТЕСТЫ ЗАЩИТЫ ОТ СНАЙПИНГА (ANTI-SNIPE)");
+  console.log("─".repeat(80));
+  
+  const antiSnipeResults: AntiSnipeTestResult[] = [];
+  
+  antiSnipeResults.push(await testAntiSnipeBasic(admin.token));
+  antiSnipeResults.push(await testAntiSnipeMultipleBids(admin.token));
+  antiSnipeResults.push(await testAntiSnipeOutsideWindow(admin.token));
+  
+  printAntiSnipeReport(antiSnipeResults);
+  
+  // Step 4: Create test auction for performance tests
+  console.log("\n" + "─".repeat(80));
+  console.log("                    ТЕСТЫ ПРОИЗВОДИТЕЛЬНОСТИ");
+  console.log("─".repeat(80));
+  
+  console.log("\n3️⃣  Создание тестового аукциона для тестов производительности...");
+  const perfAuctionId = await createTestAuction(admin.token, {
+    firstRoundDurationSec: 600,
+    roundDurationSec: 600,
+  });
+  console.log(`   ✅ Аукцион создан: ${perfAuctionId}`);
   
   console.log("\n4️⃣  Ожидание старта аукциона...");
-  const auctionStarted = await waitForAuctionStart(auctionId, 30);
+  const auctionStarted = await waitForAuctionStart(perfAuctionId, 30);
   if (!auctionStarted) {
     console.error("❌ Аукцион не запустился");
     process.exit(1);
   }
   console.log("   ✅ Аукцион активен");
   
-  // Pre-create users for bid tests BEFORE registration stress test
-  console.log("\n5️⃣  Предварительное создание пользователей для тестов ставок...");
-  const preCreatedUsers: User[] = [];
-  for (let i = 0; i < 300; i++) {
+  // Step 5: Create test users
+  console.log("\n5️⃣  Создание тестовых пользователей...");
+  const testUsers: User[] = [];
+  const targetUsers = 100;
+  
+  for (let i = 0; i < targetUsers; i++) {
     try {
-      const user = await getOrCreateUser(i);
-      preCreatedUsers.push(user);
-      if ((i + 1) % 50 === 0) {
-        console.log(`   Создано ${i + 1}/300 пользователей`);
+      const user = await createTestUser(admin.token, i);
+      testUsers.push(user);
+      if ((i + 1) % 20 === 0) {
+        console.log(`   Создано ${i + 1}/${targetUsers} пользователей`);
       }
     } catch (error: any) {
       console.log(`   ⚠️ Ошибка создания пользователя ${i}: ${error.message}`);
       break;
     }
   }
-  console.log(`   ✅ Создано ${preCreatedUsers.length} пользователей для тестов`);
+  console.log(`   ✅ Создано ${testUsers.length} пользователей`);
   
-  // Run limit tests
-  console.log("\n" + "─".repeat(80));
-  console.log("                    НАЧАЛО ПОИСКА ПРЕДЕЛОВ СИСТЕМЫ");
-  console.log("─".repeat(80));
-  
-  const wsTest = await testWebSocketLimit();
+  // Step 6: Run performance tests
+  const wsTest = await testWebSocketLimit(perfAuctionId);
   const userTest = await testConcurrentUsersLimit();
-  const rpsTest = await testRPSLimitWithUsers(auctionId, preCreatedUsers);
-  const bidderTest = await testConcurrentBiddersLimitWithUsers(auctionId, preCreatedUsers);
+  const rpsTest = await testRPSLimit(perfAuctionId, testUsers);
+  const bidderTest = await testConcurrentBiddersLimit(perfAuctionId, testUsers);
   
-  // Find response times at limit
+  // Calculate limits
   const rpsAtLimit = rpsTest.results.find(r => r.level === rpsTest.limit) || rpsTest.results[rpsTest.results.length - 1];
   
   const limits: SystemLimits = {
@@ -1041,14 +1170,34 @@ async function main() {
     p95ResponseTimeAtLimit: rpsAtLimit?.p95ResponseTime || 0,
   };
   
-  printLimitsReport(limits, {
+  printPerformanceReport(limits, {
     wsResults: wsTest.results,
     userResults: userTest.results,
     rpsResults: rpsTest.results,
     bidderResults: bidderTest.results,
   });
   
-  await closeMongoClient();
+  // Final summary
+  console.log("\n" + "═".repeat(80));
+  console.log("                    📋 ИТОГОВЫЙ ОТЧЁТ");
+  console.log("═".repeat(80));
+  
+  const antiSnipePassed = antiSnipeResults.filter(r => r.passed).length;
+  const antiSnipeTotal = antiSnipeResults.length;
+  
+  console.log(`\n  🛡️ Anti-Snipe тесты: ${antiSnipePassed}/${antiSnipeTotal} пройдено`);
+  console.log(`  🔌 WebSocket: до ${limits.maxWebSocketConnections} подключений`);
+  console.log(`  ⚡ RPS: до ${limits.sustainedRPS.toFixed(1)} запросов/сек`);
+  console.log(`  🎯 Одновременных ставок: до ${limits.maxConcurrentBidders}`);
+  
+  console.log("\n" + "═".repeat(80));
+  console.log(`  Тестирование завершено: ${new Date().toLocaleString()}`);
+  console.log("═".repeat(80) + "\n");
+  
+  // Exit with error if anti-snipe tests failed
+  if (antiSnipePassed < antiSnipeTotal) {
+    process.exit(1);
+  }
 }
 
 main().catch(async (error) => {
@@ -1056,6 +1205,5 @@ main().catch(async (error) => {
   if (error.response) {
     console.error("   Ответ сервера:", error.response.data);
   }
-  await closeMongoClient();
   process.exit(1);
 });

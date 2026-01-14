@@ -5,7 +5,7 @@ import { Bid } from "../models/Bid";
 import { Transaction } from "../models/Transaction";
 import { User } from "../models/User";
 import { z } from "zod";
-import { unitsFromString, unitsToAmount } from "../utils/amount";
+import { parseAmountToUnits, unitsFromString, unitsToAmount, unitsToString } from "../utils/amount";
 import type { Currency } from "../types/domain";
 import { EventLog } from "../models/EventLog";
 import { Auction } from "../models/Auction";
@@ -149,6 +149,15 @@ const completeWithdrawalSchema = z.object({
   txHash: z.string().min(3),
 });
 
+const setBalanceSchema = z.object({
+  currency: z.enum(["TON", "USDT"]),
+  amount: z.string().regex(/^\d+(\.\d+)?$/),
+});
+
+const setRoleSchema = z.object({
+  role: z.enum(["admin", "user"]),
+});
+
 router.post(
   "/admin/withdrawals/:id/complete",
   requireAuth,
@@ -169,6 +178,116 @@ router.post(
     tx.externalId = data.txHash;
     await tx.save();
     res.json({ status: tx.status, externalId: tx.externalId });
+  })
+);
+
+// Admin endpoint to set user balance (for testing and admin purposes)
+router.post(
+  "/admin/users/:id/balance",
+  requireAuth,
+  requireRole("admin"),
+  asyncHandler(async (req, res) => {
+    if (!isValidObjectId(req.params.id)) {
+      throw badRequest("Invalid user ID");
+    }
+    const data = setBalanceSchema.parse(req.body);
+    const user = await User.findById(req.params.id);
+    if (!user) {
+      throw notFound("User not found");
+    }
+    
+    const currency = data.currency as Currency;
+    const units = parseAmountToUnits(data.amount, currency);
+    const currentTotal = unitsFromString(user.balances[currency].total);
+    const delta = units - currentTotal;
+    
+    user.balances[currency].total = unitsToString(units);
+    await user.save();
+    
+    // Record transaction for audit
+    if (delta !== 0n) {
+      await Transaction.create({
+        userId: user._id,
+        type: "admin_credit",
+        currency,
+        amount: unitsToString(delta > 0n ? delta : -delta),
+        status: "completed",
+        meta: { direction: delta > 0n ? "credit" : "debit" },
+      });
+    }
+    
+    const total = unitsFromString(user.balances[currency].total);
+    const locked = unitsFromString(user.balances[currency].locked);
+    
+    res.json({
+      userId: user._id.toString(),
+      currency,
+      balance: {
+        total: unitsToAmount(total, currency),
+        locked: unitsToAmount(locked, currency),
+        available: unitsToAmount(total - locked, currency),
+      },
+    });
+  })
+);
+
+// Admin endpoint to set user role
+router.post(
+  "/admin/users/:id/role",
+  requireAuth,
+  requireRole("admin"),
+  asyncHandler(async (req, res) => {
+    if (!isValidObjectId(req.params.id)) {
+      throw badRequest("Invalid user ID");
+    }
+    const data = setRoleSchema.parse(req.body);
+    const user = await User.findById(req.params.id);
+    if (!user) {
+      throw notFound("User not found");
+    }
+    
+    user.role = data.role;
+    await user.save();
+    
+    res.json({
+      userId: user._id.toString(),
+      role: user.role,
+    });
+  })
+);
+
+// Admin endpoint to list users
+router.get(
+  "/admin/users",
+  requireAuth,
+  requireRole("admin"),
+  asyncHandler(async (req, res) => {
+    const limit = Math.min(Number(req.query.limit) || 100, 500);
+    const skip = Number(req.query.skip) || 0;
+    const users = await User.find()
+      .sort({ createdAt: -1 })
+      .skip(skip)
+      .limit(limit)
+      .lean();
+    
+    res.json(
+      users.map((user) => ({
+        id: user._id.toString(),
+        username: user.username,
+        role: user.role,
+        balances: {
+          TON: {
+            total: unitsToAmount(unitsFromString(user.balances.TON.total), "TON"),
+            locked: unitsToAmount(unitsFromString(user.balances.TON.locked), "TON"),
+          },
+          USDT: {
+            total: unitsToAmount(unitsFromString(user.balances.USDT.total), "USDT"),
+            locked: unitsToAmount(unitsFromString(user.balances.USDT.locked), "USDT"),
+          },
+        },
+        createdAt: user.createdAt,
+      }))
+    );
   })
 );
 
