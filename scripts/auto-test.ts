@@ -88,6 +88,11 @@ function questionHidden(rl: readline.Interface, prompt: string): Promise<string>
   });
 }
 
+// Remove trailing slash from URL
+function normalizeUrl(url: string): string {
+  return url.replace(/\/+$/, "");
+}
+
 async function promptForConfiguration(): Promise<void> {
   // Check if all config is provided via environment or arguments
   const envApiBase = process.env.API_BASE || process.argv[2];
@@ -97,8 +102,8 @@ async function promptForConfiguration(): Promise<void> {
   
   // If all required params are provided, use them
   if (envApiBase && envUsername && envPassword) {
-    API_BASE = envApiBase;
-    WS_BASE = envWsBase || envApiBase.replace(/^http/, "ws");
+    API_BASE = normalizeUrl(envApiBase);
+    WS_BASE = normalizeUrl(envWsBase || envApiBase.replace(/^http/, "ws"));
     ADMIN_USERNAME = envUsername;
     ADMIN_PASSWORD = envPassword;
     ANTI_SNIPE_WINDOW_SEC = Number(process.env.ANTI_SNIPE_WINDOW_SEC || "30");
@@ -118,11 +123,11 @@ async function promptForConfiguration(): Promise<void> {
     // API URL
     const defaultApiBase = envApiBase || "http://localhost:3000";
     const apiBaseInput = await question(rl, `  🌐 URL сервера API [${defaultApiBase}]: `);
-    API_BASE = apiBaseInput || defaultApiBase;
+    API_BASE = normalizeUrl(apiBaseInput || defaultApiBase);
     
     // WebSocket URL (auto-derived from API URL)
     const defaultWsBase = API_BASE.replace(/^http/, "ws");
-    WS_BASE = defaultWsBase;
+    WS_BASE = normalizeUrl(defaultWsBase);
     console.log(`  📡 WebSocket URL: ${WS_BASE}`);
     
     // Admin username

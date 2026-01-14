@@ -285,7 +285,6 @@ router.get(
             locked: unitsToAmount(unitsFromString(user.balances.USDT.locked), "USDT"),
           },
         },
-        createdAt: user.createdAt,
       }))
     );
   })
