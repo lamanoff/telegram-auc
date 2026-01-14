@@ -1,33 +1,16 @@
 services:
-  mongo:
-    image: mongo:8.2
-    container_name: auction-mongo
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: auction-frontend
     ports:
-      - "27017:27017"
-    command: mongod --replSet rs0 --bind_ip_all
-    healthcheck:
-      test: |
-        mongosh --eval "try { rs.status().ok } catch(e) { rs.initiate({_id:'rs0',members:[{_id:0,host:'mongo:27017'}]}).ok }" --quiet
-      interval: 10s
-      timeout: 10s
-      retries: 5
-      start_period: 30s
+      - "8080:8080"
+    depends_on:
+      - backend
     networks:
       - auction-network
-
-  redis:
-    image: redis:8.4-alpine
-    container_name: auction-redis
-    ports:
-      - "6379:6379"
-    command: redis-server --appendonly yes --maxmemory 512mb --maxmemory-policy noeviction
-    healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-    networks:
-      - auction-network
+    restart: unless-stopped
 
   backend:
     build:
@@ -54,18 +37,31 @@ services:
       - auction-network
     restart: unless-stopped
 
-  frontend:
-    build:
-      context: ./frontend
-      dockerfile: Dockerfile
-    container_name: auction-frontend
-    ports:
-      - "80:80"
-    depends_on:
-      - backend
+  mongo:
+    image: mongo:8.2
+    container_name: auction-mongo
+    command: mongod --replSet rs0 --bind_ip_all
+    healthcheck:
+      test: |
+        mongosh --eval "try { rs.status().ok } catch(e) { rs.initiate({_id:'rs0',members:[{_id:0,host:'mongo:27017'}]}).ok }" --quiet
+      interval: 10s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
     networks:
       - auction-network
-    restart: unless-stopped
+
+  redis:
+    image: redis:8.4-alpine
+    container_name: auction-redis
+    command: redis-server --appendonly yes --maxmemory 512mb --maxmemory-policy noeviction
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - auction-network
 
 networks:
   auction-network:
