@@ -203,18 +203,7 @@ export async function transfer(params: {
     throw badRequest("Transfer failed");
   }
 
-  await Transaction.create({
-    userId: params.userId,
-    type: "withdrawal",
-    currency: params.currency,
-    amount: unitsToString(amountUnits),
-    status: "completed",
-    provider: "cryptobot",
-    externalId: data.result.transfer_id.toString(),
-    meta: {
-      recipient: params.recipient,
-    },
-  });
+  // Транзакция создаётся и управляется в роуте /withdraw
   await logEvent({
     type: "withdrawal.completed",
     userId: params.userId,

@@ -5,7 +5,6 @@ import { Auction } from "../models/Auction";
 import { Bid } from "../models/Bid";
 import { BidHistory } from "../models/BidHistory";
 import { Item } from "../models/Item";
-import { ChatMessage } from "../models/ChatMessage";
 import { RoundResult } from "../models/RoundResult";
 import { asyncHandler } from "../utils/asyncHandler";
 import {
@@ -22,9 +21,7 @@ import { unitsFromString, unitsToAmount } from "../utils/amount";
 import type { Currency } from "../types/domain";
 import { checkBidRateLimit } from "../utils/rateLimit";
 import { addBidToQueue } from "../services/bidQueue";
-import { logEvent } from "../services/eventService";
 import { isValidObjectId } from "../utils/validation";
-import { sanitizeHtml } from "../utils/validation";
 
 const amountField = z.union([z.string(), z.number()]).transform((val) => String(val)).pipe(z.string().max(50));
 
@@ -59,10 +56,6 @@ const updateAuctionSchema = z.object({
 
 const bidSchema = z.object({
   amount: z.union([z.string(), z.number()]).transform((val) => String(val)).pipe(z.string().max(50)),
-});
-
-const chatSchema = z.object({
-  message: z.string().min(1).max(500),
 });
 
 export function createAuctionRoutes(hub: AuctionHub) {
@@ -268,58 +261,6 @@ export function createAuctionRoutes(hub: AuctionHub) {
           pricePaid: unitsToAmount(unitsFromString(item.pricePaid), currency),
         }))
       );
-    })
-  );
-
-  router.get(
-    "/:id/chat",
-    asyncHandler(async (req, res) => {
-      if (!isValidObjectId(req.params.id)) {
-        throw badRequest("Invalid auction ID");
-      }
-      const messages = await ChatMessage.find({ auctionId: req.params.id })
-        .sort({ createdAt: -1 })
-        .limit(100)
-        .lean();
-      res.json(
-        messages.map((message) => ({
-          id: message._id.toString(),
-          userId: message.userId.toString(),
-          message: sanitizeHtml(message.message),
-          createdAt: message.createdAt,
-        }))
-      );
-    })
-  );
-
-  router.post(
-    "/:id/chat",
-    requireAuth,
-    asyncHandler(async (req, res) => {
-      if (!isValidObjectId(req.params.id)) {
-        throw badRequest("Invalid auction ID");
-      }
-      const data = chatSchema.parse(req.body);
-      const sanitizedMessage = sanitizeHtml(data.message);
-      const chat = await ChatMessage.create({
-        auctionId: req.params.id,
-        userId: req.user!.id,
-        message: sanitizedMessage,
-      });
-      const payload = {
-        id: chat._id.toString(),
-        userId: req.user!.id,
-        message: chat.message,
-        createdAt: chat.createdAt,
-      };
-      await logEvent({
-        type: "chat.message",
-        userId: req.user!.id,
-        auctionId: req.params.id,
-        payload: { message: chat.message },
-      });
-      hub.broadcast(req.params.id, { type: "chat.message", data: payload });
-      res.status(201).json(payload);
     })
   );
 

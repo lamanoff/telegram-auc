@@ -124,39 +124,13 @@
           </div>
         </div>
 
-        <!-- Right Column - Chat -->
-        <div class="right-column">
-          <div class="card chat-card">
-            <h2>💬 Чат аукциона</h2>
-            <div class="chat-messages" ref="chatContainer">
-              <div v-if="messages.length === 0" class="empty-chat">
-                Сообщений пока нет
-              </div>
-              <div v-for="message in messages" :key="message.id" class="chat-message">
-                <span class="message-user">{{ message.userId }}</span>
-                <span class="message-text">{{ message.message }}</span>
-                <span class="message-time">{{ formatChatTime(message.createdAt) }}</span>
-              </div>
-            </div>
-            <div class="chat-input">
-              <input 
-                v-model="chatMessage" 
-                @keyup.enter="sendMessage" 
-                placeholder="Введите сообщение..."
-              />
-              <button @click="sendMessage" class="btn btn-primary">
-                📤
-              </button>
-            </div>
-          </div>
-        </div>
       </div>
     </div>
   </div>
 </template>
 
 <script setup>
-import { ref, onMounted, onUnmounted, nextTick } from 'vue'
+import { ref, onMounted, onUnmounted } from 'vue'
 import { useRoute } from 'vue-router'
 import api from '../api'
 import { formatBalance } from '../utils/amount'
@@ -173,9 +147,6 @@ const bidAmount = ref('')
 const placingBid = ref(false)
 const bidError = ref('')
 const bidSuccess = ref(false)
-const messages = ref([])
-const chatMessage = ref('')
-const chatContainer = ref(null)
 const ws = ref(null)
 
 const fetchAuction = async () => {
@@ -187,16 +158,6 @@ const fetchAuction = async () => {
     error.value = err.response?.data?.error || 'Ошибка загрузки аукциона'
   } finally {
     loading.value = false
-  }
-}
-
-const fetchMessages = async () => {
-  try {
-    const response = await api.get(`/auctions/${route.params.id}/chat`)
-    messages.value = response.data.reverse()
-    scrollChatToBottom()
-  } catch (err) {
-    console.error('Error fetching messages:', err)
   }
 }
 
@@ -227,30 +188,10 @@ const placeBid = async () => {
   }
 }
 
-const sendMessage = async () => {
-  if (!chatMessage.value.trim()) return
-  
-  try {
-    await api.post(`/auctions/${route.params.id}/chat`, {
-      message: chatMessage.value
-    })
-    chatMessage.value = ''
-    fetchMessages()
-  } catch (err) {
-    console.error('Error sending message:', err)
-  }
-}
-
 const formatTime = (timeString) => {
   if (!timeString) return ''
   const date = new Date(timeString)
   return date.toLocaleString('ru-RU')
-}
-
-const formatChatTime = (timeString) => {
-  if (!timeString) return ''
-  const date = new Date(timeString)
-  return date.toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' })
 }
 
 const getStatusText = (status) => {
@@ -273,14 +214,6 @@ const getStatusBadgeClass = (status) => {
   return classMap[status] || ''
 }
 
-const scrollChatToBottom = () => {
-  nextTick(() => {
-    if (chatContainer.value) {
-      chatContainer.value.scrollTop = chatContainer.value.scrollHeight
-    }
-  })
-}
-
 const setupWebSocket = () => {
   if (!authStore.token) return
   
@@ -299,11 +232,6 @@ const setupWebSocket = () => {
     alert(`Раунд ${data.roundNumber} завершён! Победителей: ${data.winners.length}`)
   })
   
-  ws.value.on('chat.message', (data) => {
-    messages.value.push(data)
-    scrollChatToBottom()
-  })
-  
   ws.value.connect()
 }
 
@@ -311,12 +239,10 @@ let interval = null
 
 onMounted(async () => {
   await fetchAuction()
-  await fetchMessages()
   setupWebSocket()
   
   interval = setInterval(() => {
     fetchAuction()
-    fetchMessages()
   }, 5000)
 })
 
@@ -437,8 +363,9 @@ onUnmounted(() => {
 
 .main-grid {
   display: grid;
-  grid-template-columns: 1fr 400px;
+  grid-template-columns: 1fr;
   gap: 24px;
+  max-width: 800px;
 }
 
 .bid-card h2 {
@@ -562,75 +489,7 @@ onUnmounted(() => {
   margin-bottom: 12px;
 }
 
-.chat-card {
-  height: fit-content;
-}
-
-.chat-messages {
-  height: 400px;
-  overflow-y: auto;
-  padding: 16px;
-  background: var(--bg-secondary);
-  border-radius: 12px;
-  margin-bottom: 16px;
-}
-
-.empty-chat {
-  text-align: center;
-  color: var(--text-muted);
-  padding: 40px;
-}
-
-.chat-message {
-  padding: 10px 0;
-  border-bottom: 1px solid var(--border-color);
-}
-
-.chat-message:last-child {
-  border-bottom: none;
-}
-
-.message-user {
-  font-weight: 600;
-  color: var(--accent-cyan);
-  margin-right: 8px;
-}
-
-.message-text {
-  color: var(--text-primary);
-}
-
-.message-time {
-  float: right;
-  font-size: 11px;
-  color: var(--text-muted);
-}
-
-.chat-input {
-  display: flex;
-  gap: 12px;
-}
-
-.chat-input input {
-  flex: 1;
-  padding: 12px 16px;
-  background: var(--bg-secondary);
-  border: 1px solid var(--border-color);
-  border-radius: 10px;
-  color: var(--text-primary);
-  font-family: 'Inter', sans-serif;
-}
-
-.chat-input input:focus {
-  outline: none;
-  border-color: var(--accent-cyan);
-}
-
 @media (max-width: 1024px) {
-  .main-grid {
-    grid-template-columns: 1fr;
-  }
-  
   .auction-header {
     flex-direction: column;
     gap: 24px;

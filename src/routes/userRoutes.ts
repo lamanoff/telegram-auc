@@ -10,6 +10,7 @@ import {
   parseAmountToUnits,
   unitsFromString,
   unitsToAmount,
+  unitsToString,
 } from "../utils/amount";
 import { applyBalanceDelta, getAvailable } from "../services/balanceService";
 import { createInvoice, transfer } from "../services/cryptobotService";
@@ -97,15 +98,47 @@ router.post(
     if (available < units) {
       throw badRequest("Insufficient balance");
     }
+
+    // Списываем баланс
     applyBalanceDelta(user, data.currency, -units, 0n);
     await user.save();
-    const transferResult = await transfer({
-      userId: user._id.toString(),
+
+    // Создаём pending транзакцию
+    const tx = await Transaction.create({
+      userId: user._id,
+      type: "withdrawal",
       currency: data.currency,
-      amount: data.amount,
-      recipient: data.destination,
+      amount: unitsToString(units),
+      status: "pending",
+      provider: "cryptobot",
+      meta: { recipient: data.destination },
     });
-    res.json({ status: "withdrawn", provider: "cryptobot", transfer: transferResult });
+
+    try {
+      const transferResult = await transfer({
+        userId: user._id.toString(),
+        currency: data.currency,
+        amount: data.amount,
+        recipient: data.destination,
+      });
+
+      // Успех — обновляем транзакцию
+      tx.status = "completed";
+      tx.externalId = transferResult.transfer_id.toString();
+      await tx.save();
+
+      res.json({ status: "withdrawn", provider: "cryptobot", transfer: transferResult });
+    } catch (error) {
+      // Ошибка — откатываем баланс
+      applyBalanceDelta(user, data.currency, units, 0n);
+      await user.save();
+
+      // Помечаем транзакцию как failed
+      tx.status = "failed";
+      await tx.save();
+
+      throw error;
+    }
   })
 );
 

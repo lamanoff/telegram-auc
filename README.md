@@ -11,6 +11,13 @@ docker-compose up -d
 После запуска:
 - Frontend: http://localhost
 - Backend API: http://localhost:3000
+- Админ панель: http://localhost/admin
+
+**Учётные данные по умолчанию:**
+- Логин: `admin`
+- Пароль: `admin123`
+
+> Измените пароль админа в продакшене через переменные `ADMIN_USERNAME` и `ADMIN_PASSWORD`
 
 ## Возможности
 
@@ -134,8 +141,6 @@ docker-compose up -d
 - `GET /api/auctions/:id/mybid` - Моя ставка
 - `GET /api/auctions/:id/history` - История раундов
 - `GET /api/auctions/:id/items` - Проданные лоты
-- `GET /api/auctions/:id/chat` - Сообщения чата
-- `POST /api/auctions/:id/chat` - Отправить сообщение
 
 ### Финансы
 - `POST /api/deposit` - Создать депозит
@@ -162,7 +167,6 @@ docker-compose up -d
 - `round.closed` - Закрытие раунда
 - `auction.started` - Запуск аукциона
 - `auction.cancelled` - Отмена аукциона
-- `chat.message` - Новое сообщение в чате
 - `viewer.count` - Количество зрителей
 
 ## Нагрузочное тестирование
