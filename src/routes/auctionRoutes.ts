@@ -6,6 +6,7 @@ import { Bid } from "../models/Bid";
 import { BidHistory } from "../models/BidHistory";
 import { Item } from "../models/Item";
 import { RoundResult } from "../models/RoundResult";
+import { User } from "../models/User";
 import { asyncHandler } from "../utils/asyncHandler";
 import {
   cancelAuction,
@@ -17,11 +18,12 @@ import {
 } from "../services/auctionService";
 import { AuctionHub } from "../ws/auctionHub";
 import { badRequest, notFound } from "../utils/errors";
-import { unitsFromString, unitsToAmount } from "../utils/amount";
+import { unitsFromString, unitsToAmount, parseAmountToUnits } from "../utils/amount";
 import type { Currency } from "../types/domain";
 import { checkBidRateLimit } from "../utils/rateLimit";
 import { addBidToQueue } from "../services/bidQueue";
 import { isValidObjectId } from "../utils/validation";
+import { getAvailable } from "../services/balanceService";
 
 const amountField = z.union([z.string(), z.number()]).transform((val) => String(val)).pipe(z.string().max(50));
 
@@ -143,6 +145,47 @@ export function createAuctionRoutes(hub: AuctionHub) {
       if (!(await checkBidRateLimit(rateLimitKey))) {
         throw badRequest("Too many bid attempts");
       }
+      
+      // Pre-check balance before queuing
+      const auction = await Auction.findById(req.params.id).lean();
+      if (!auction) {
+        throw notFound("Auction not found");
+      }
+      if (auction.status !== "active") {
+        throw badRequest("Auction is not active");
+      }
+      
+      const user = await User.findById(req.user!.id).lean();
+      if (!user) {
+        throw notFound("User not found");
+      }
+      
+      const amountUnits = parseAmountToUnits(data.amount, auction.currency as Currency);
+      if (amountUnits <= 0n) {
+        throw badRequest("Bid amount must be positive");
+      }
+      
+      // Check existing bid to calculate required delta
+      const existingBid = await Bid.findOne({
+        auctionId: auction._id,
+        userId: req.user!.id,
+        status: "active",
+      }).lean();
+      
+      const available = getAvailable(user.balances[auction.currency as Currency]);
+      
+      if (existingBid) {
+        const currentUnits = unitsFromString(existingBid.amount);
+        const delta = amountUnits - currentUnits;
+        if (delta > 0n && available < delta) {
+          throw badRequest("Insufficient balance");
+        }
+      } else {
+        if (available < amountUnits) {
+          throw badRequest("Insufficient balance");
+        }
+      }
+      
       const job = await addBidToQueue({
         auctionId: req.params.id,
         userId: req.user!.id,
