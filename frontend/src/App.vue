@@ -62,8 +62,10 @@ const handleLogout = () => {
 <style scoped>
 .navbar {
   background: rgba(17, 24, 39, 0.95);
+  -webkit-backdrop-filter: blur(20px);
   backdrop-filter: blur(20px);
   border-bottom: 1px solid var(--border-color);
+  position: -webkit-sticky;
   position: sticky;
   top: 0;
   z-index: 100;

@@ -17,16 +17,21 @@ import { createInvoice, transfer } from "../services/cryptobotService";
 
 const router = Router();
 
+const amountField = z
+  .union([z.string(), z.number()])
+  .transform((val) => String(val))
+  .pipe(z.string().max(50).regex(/^\d+(\.\d+)?$/));
+
 const depositSchema = z.object({
   provider: z.enum(["cryptobot"]),
   currency: z.enum(["TON", "USDT"]),
-  amount: z.string().max(50).regex(/^\d+(\.\d+)?$/),
+  amount: amountField,
 });
 
 const withdrawSchema = z.object({
   provider: z.enum(["cryptobot"]),
   currency: z.enum(["TON", "USDT"]),
-  amount: z.string(),
+  amount: amountField,
   destination: z.string().min(1).max(200),
 });
 

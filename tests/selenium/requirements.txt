@@ -1,0 +1,15 @@
+# Selenium WebDriver (4.6+ включает Selenium Manager для авто-скачивания драйверов)
+selenium>=4.27.0
+
+# Pytest framework
+pytest>=8.3.0
+pytest-html>=4.1.0
+pytest-xdist>=3.5.0
+
+# HTTP requests (для проверки API и создания пользователей)
+requests>=2.32.0
+
+# Additional utilities
+python-dotenv>=1.0.0
+faker>=33.0.0
+allure-pytest>=2.13.0

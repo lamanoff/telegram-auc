@@ -36,7 +36,7 @@ async function bootstrap() {
     crossOriginEmbedderPolicy: false,
   }));
 
-  const defaultOrigins = ['http://localhost', 'http://localhost:80', 'http://localhost:5173'];
+  const defaultOrigins = ['http://localhost', 'http://localhost:80', 'http://localhost:5173', 'http://localhost:8080'];
   const customOrigins = process.env.FRONTEND_URL 
     ? process.env.FRONTEND_URL.split(',').map(o => o.trim().replace(/\/$/, ''))
     : [];
