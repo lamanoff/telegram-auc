@@ -64,8 +64,8 @@
           <span>✅</span>
           <div>
             <strong>Ссылка для оплаты:</strong>
-            <a :href="depositInvoice.pay_url" target="_blank" rel="noopener">
-              {{ depositInvoice.pay_url }}
+            <a :href="depositInvoice.payUrl" target="_blank" rel="noopener">
+              {{ depositInvoice.payUrl }}
             </a>
           </div>
         </div>
