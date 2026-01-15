@@ -49,13 +49,16 @@
 </template>
 
 <script setup>
+import { useRouter } from 'vue-router'
 import { useAuthStore } from './stores/auth'
 import { formatBalance } from './utils/amount'
 
+const router = useRouter()
 const authStore = useAuthStore()
 
 const handleLogout = () => {
   authStore.logout()
+  router.push('/')
 }
 </script>
 

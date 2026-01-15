@@ -365,7 +365,6 @@ onUnmounted(() => {
   display: grid;
   grid-template-columns: 1fr;
   gap: 24px;
-  max-width: 800px;
 }
 
 .bid-card h2 {

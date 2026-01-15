@@ -43,7 +43,8 @@ export async function createInvoice(params: {
     throw badRequest("Amount must be positive");
   }
   
-  const maxAmount = params.currency === "TON" ? 1000000n : 1000000000000n;
+  // Max 10000 TON or 10000 USDT (in smallest units: nanoTON and microUSDT)
+  const maxAmount = params.currency === "TON" ? 10000000000000n : 10000000000n;
   if (amountUnits > maxAmount) {
     throw badRequest("Amount exceeds maximum limit");
   }
@@ -180,7 +181,8 @@ export async function transfer(params: {
     throw badRequest("Amount must be positive");
   }
   
-  const maxAmount = params.currency === "TON" ? 1000000n : 1000000000000n;
+  // Max 10000 TON or 10000 USDT (in smallest units: nanoTON and microUSDT)
+  const maxAmount = params.currency === "TON" ? 10000000000000n : 10000000000n;
   if (amountUnits > maxAmount) {
     throw badRequest("Amount exceeds maximum limit");
   }
