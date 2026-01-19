@@ -177,13 +177,17 @@ router.get(
   requireAuth,
   asyncHandler(async (req, res) => {
     const items = await Item.find({ winnerUserId: req.user?.id })
-      .populate("auctionId", "title currency")
+      .populate<{ auctionId: { _id: any; title: string; currency: Currency } }>("auctionId", "title currency")
       .sort({ createdAt: -1 })
       .lean();
     
     res.json(
       items.map((item) => {
-        const auction = item.auctionId as { _id: any; title: string; currency: Currency };
+        const auction = item.auctionId;
+        if (!auction || typeof auction === 'string' || !('title' in auction)) {
+          throw notFound("Auction not found for item");
+        }
+        
         return {
           id: item._id.toString(),
           auctionId: auction._id.toString(),
@@ -192,7 +196,7 @@ router.get(
           roundNumber: item.roundNumber,
           serialNumber: item.serialNumber,
           pricePaid: unitsToAmount(unitsFromString(item.pricePaid), auction.currency),
-          purchasedAt: item.createdAt,
+          purchasedAt: (item as any).createdAt || new Date(),
         };
       })
     );
