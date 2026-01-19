@@ -91,7 +91,7 @@
                     {{ getStatusText(auction.status) }}
                   </span>
                 </td>
-                <td>{{ auction.currentRound }} / {{ auction.roundsCount }}</td>
+                <td>{{ auction.currentRound }} / {{ auction.totalRounds }}</td>
                 <td>{{ auction.itemsSold }} / {{ auction.totalItems }}</td>
                 <td><span class="currency-badge small">{{ auction.currency }}</span></td>
                 <td class="actions">

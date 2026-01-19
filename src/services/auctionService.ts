@@ -31,7 +31,7 @@ export async function listAuctions() {
     status: auction.status,
     startTime: auction.startTime,
     currentRound: auction.currentRound,
-    roundsCount: auction.roundsCount,
+    totalRounds: auction.roundsCount,
     itemsPerRound: auction.itemsPerRound,
     totalItems: auction.totalItems,
     itemsSold: auction.itemsSold,
@@ -50,42 +50,91 @@ export async function getAuctionDetails(auctionId: string, userId?: string) {
   if (!auction) {
     throw notFound("Auction not found");
   }
+  
+  // Для завершенных аукционов показываем победителей, для активных - текущие ставки
+  const isCompleted = auction.status === "completed";
+  const bidStatus = isCompleted ? "won" : "active";
+  
   const remainingItems = Math.max(auction.totalItems - auction.itemsSold, 0);
   const limit = Math.min(auction.itemsPerRound, remainingItems || auction.itemsPerRound);
-  const topBids = await Bid.find({ auctionId, status: "active" })
-    .sort({ amountSort: -1, lastBidAt: 1 })
-    .limit(limit)
-    .populate("userId", "username")
-    .lean();
+  
+  // Для завершенных аукционов показываем все победившие ставки, отсортированные по раунду и сумме
+  const topBids = isCompleted
+    ? await Bid.find({ auctionId, status: "won" })
+        .sort({ wonRound: 1, amountSort: -1, lastBidAt: 1 })
+        .populate("userId", "username")
+        .lean()
+    : await Bid.find({ auctionId, status: "active" })
+        .sort({ amountSort: -1, lastBidAt: 1 })
+        .limit(limit)
+        .populate("userId", "username")
+        .lean();
 
-  const minUnits =
-    topBids.length >= limit
-      ? unitsFromString(topBids[topBids.length - 1].amount) +
-        unitsFromString(auction.minIncrement)
-      : unitsFromString(auction.startingPrice);
+  // Для завершенных аукционов не вычисляем минимальную ставку
+  let currentMinBid: string | null = null;
+  let nextRoundMinBid: string | null = null;
+  
+  if (!isCompleted) {
+    const minUnits = computeMinRequiredUnits(
+      { 
+        startingPrice: auction.startingPrice, 
+        minIncrement: auction.minIncrement,
+        currentRound: auction.currentRound 
+      },
+      topBids,
+      limit
+    );
 
-  const currentMinBid = unitsToAmount(minUnits, auction.currency as Currency);
+    currentMinBid = unitsToAmount(minUnits, auction.currency as Currency);
+    
+    // Вычисляем прогноз минимальной ставки для следующего раунда
+    const nextRoundMinUnits = computeNextRoundMinPrice({
+      startingPrice: auction.startingPrice,
+      minIncrement: auction.minIncrement,
+      currentRound: auction.currentRound,
+      roundsCount: auction.roundsCount
+    });
+    nextRoundMinBid = nextRoundMinUnits 
+      ? unitsToAmount(nextRoundMinUnits, auction.currency as Currency)
+      : null;
+  }
 
   let userBid;
   if (userId) {
-    const bid = await Bid.findOne({ auctionId, userId, status: "active" }).lean();
+    // Для завершенных аукционов ищем ставку со статусом "won" или "lost"
+    const bidStatusFilter = isCompleted ? { $in: ["won", "lost"] } : "active";
+    const bid = await Bid.findOne({ auctionId, userId, status: bidStatusFilter }).lean();
     if (bid) {
-      const higherCount = await Bid.countDocuments({
-        auctionId,
-        status: "active",
-        $or: [
-          { amountSort: { $gt: bid.amountSort } },
-          {
-            amountSort: bid.amountSort,
-            lastBidAt: { $lt: bid.lastBidAt },
-          },
-        ],
-      });
-      userBid = {
-        amount: unitsToAmount(unitsFromString(bid.amount), auction.currency as Currency),
-        rank: higherCount + 1,
-        status: bid.status,
-      };
+      if (isCompleted) {
+        // Для завершенных аукционов показываем статус ставки
+        const wonBids = await Bid.find({ auctionId, status: "won" })
+          .sort({ wonRound: 1, amountSort: -1, lastBidAt: 1 })
+          .lean();
+        const rank = wonBids.findIndex(b => b._id.toString() === bid._id.toString()) + 1;
+        userBid = {
+          amount: unitsToAmount(unitsFromString(bid.amount), auction.currency as Currency),
+          rank: bid.status === "won" ? rank : null,
+          status: bid.status,
+        };
+      } else {
+        // Для активных аукционов считаем ранг среди активных ставок
+        const higherCount = await Bid.countDocuments({
+          auctionId,
+          status: "active",
+          $or: [
+            { amountSort: { $gt: bid.amountSort } },
+            {
+              amountSort: bid.amountSort,
+              lastBidAt: { $lt: bid.lastBidAt },
+            },
+          ],
+        });
+        userBid = {
+          amount: unitsToAmount(unitsFromString(bid.amount), auction.currency as Currency),
+          rank: higherCount + 1,
+          status: bid.status,
+        };
+      }
     }
   }
 
@@ -109,9 +158,11 @@ export async function getAuctionDetails(auctionId: string, userId?: string) {
     totalRounds: auction.roundsCount,
     roundEndsAt: auction.roundEndsAt,
     itemsPerRound: auction.itemsPerRound,
+    itemsInCurrentRound: limit,
     totalItems: auction.totalItems,
     itemsSold: auction.itemsSold,
     currentMinBid,
+    nextRoundMinBid,
     minIncrement: unitsToAmount(
       unitsFromString(auction.minIncrement),
       auction.currency as Currency
@@ -307,15 +358,44 @@ export async function updateAuction(
 }
 
 function computeMinRequiredUnits(
-  auction: { startingPrice: string; minIncrement: string },
+  auction: { startingPrice: string; minIncrement: string; currentRound: number },
   currentTopBids: { amount: string }[],
   cutoffSize: number
 ): bigint {
+  const startingPriceUnits = unitsFromString(auction.startingPrice);
+  const minIncrementUnits = unitsFromString(auction.minIncrement);
+  
+  // Автоматический рост минимальной ставки между раундами
+  // Для раунда 1: startingPrice, для раунда 2: startingPrice + minIncrement, и т.д.
+  const roundMultiplier = Math.max(0, auction.currentRound - 1);
+  const dynamicMinPrice = startingPriceUnits + (minIncrementUnits * BigInt(roundMultiplier));
+  
+  // Если все слоты заполнены, минимальная ставка = последнее место + minIncrement
   if (currentTopBids.length >= cutoffSize) {
     const lowest = currentTopBids[currentTopBids.length - 1];
-    return unitsFromString(lowest.amount) + unitsFromString(auction.minIncrement);
+    const competitiveMinPrice = unitsFromString(lowest.amount) + minIncrementUnits;
+    // Возвращаем максимум из динамической минимальной цены и конкурентной
+    return competitiveMinPrice > dynamicMinPrice ? competitiveMinPrice : dynamicMinPrice;
   }
-  return unitsFromString(auction.startingPrice);
+  
+  // Если слотов свободно, используем динамическую минимальную цену
+  return dynamicMinPrice;
+}
+
+function computeNextRoundMinPrice(
+  auction: { startingPrice: string; minIncrement: string; currentRound: number; roundsCount: number }
+): bigint | null {
+  // Если это последний раунд, следующего раунда нет
+  if (auction.currentRound >= auction.roundsCount) {
+    return null;
+  }
+  
+  const startingPriceUnits = unitsFromString(auction.startingPrice);
+  const minIncrementUnits = unitsFromString(auction.minIncrement);
+  
+  // Для следующего раунда минимальная ставка будет: startingPrice + (minIncrement * currentRound)
+  const nextRoundMultiplier = auction.currentRound;
+  return startingPriceUnits + (minIncrementUnits * BigInt(nextRoundMultiplier));
 }
 
 export async function placeBid(params: {
@@ -377,7 +457,15 @@ export async function placeBid(params: {
         .lean();
 
       const previousTopUserIds = topBids.map((bid) => bid.userId.toString());
-      const minRequiredUnits = computeMinRequiredUnits(auction, topBids, cutoffSize);
+      const minRequiredUnits = computeMinRequiredUnits(
+        { 
+          startingPrice: auction.startingPrice, 
+          minIncrement: auction.minIncrement,
+          currentRound: auction.currentRound 
+        },
+        topBids,
+        cutoffSize
+      );
 
       const existingBid = await Bid.findOne({
         auctionId: auction._id,
@@ -489,9 +577,15 @@ export async function placeBid(params: {
         .lean();
       const refreshedTopUserIds = refreshedTopBids.map((bid) => bid.userId.toString());
       const outbidUserIds = previousTopUserIds.filter((userId) => !refreshedTopUserIds.includes(userId));
-      const refreshedMinUnits = refreshedTopBids.length >= cutoffSize
-        ? unitsFromString(refreshedTopBids[refreshedTopBids.length - 1].amount) + unitsFromString(auction.minIncrement)
-        : unitsFromString(auction.startingPrice);
+      const refreshedMinUnits = computeMinRequiredUnits(
+        { 
+          startingPrice: auction.startingPrice, 
+          minIncrement: auction.minIncrement,
+          currentRound: auction.currentRound 
+        },
+        refreshedTopBids,
+        cutoffSize
+      );
 
       payload = {
         auctionId: auction._id.toString(),

@@ -26,6 +26,10 @@
         <div class="header-price" v-if="auction.status === 'active'">
           <span class="price-label">Минимальная ставка</span>
           <div class="price-value">{{ formatBalance(auction.currentMinBid, auction.currency) }}</div>
+          <div v-if="auction.nextRoundMinBid" class="next-round-price">
+            <span class="next-round-label">Следующий раунд:</span>
+            <span class="next-round-value">{{ formatBalance(auction.nextRoundMinBid, auction.currency) }}</span>
+          </div>
         </div>
       </div>
 
@@ -36,6 +40,9 @@
           <div class="stat-info">
             <div class="stat-value">{{ auction.currentRound }} / {{ auction.totalRounds }}</div>
             <div class="stat-label">Раунд</div>
+            <div class="stat-sublabel" v-if="auction.itemsInCurrentRound">
+              🎁 {{ auction.itemsInCurrentRound }} {{ auction.itemsInCurrentRound === 1 ? 'подарок' : auction.itemsInCurrentRound < 5 ? 'подарка' : 'подарков' }} в раунде
+            </div>
           </div>
         </div>
         <div class="stat-card">
@@ -104,22 +111,25 @@
 
           <!-- Top Bids -->
           <div class="card">
-            <h2>🏆 Топ ставки</h2>
+            <h2>{{ auction.status === 'completed' ? '🏆 Победители' : '🏆 Топ ставки' }}</h2>
             <div v-if="auction.topBids && auction.topBids.length > 0" class="top-bids-list">
               <div 
                 v-for="bid in auction.topBids" 
                 :key="bid.userId" 
                 class="bid-row"
-                :class="{ 'winning': bid.rank <= auction.itemsPerRound }"
+                :class="{ 
+                  'winning': auction.status === 'completed' || bid.rank <= auction.itemsPerRound 
+                }"
               >
                 <div class="bid-rank">#{{ bid.rank }}</div>
                 <div class="bid-user">{{ bid.user }}</div>
                 <div class="bid-amount">{{ formatBalance(bid.amount, auction.currency) }}</div>
+                <div v-if="auction.status === 'completed'" class="bid-status">🏆 Победитель</div>
               </div>
             </div>
             <div v-else class="empty-bids">
               <span>📭</span>
-              <p>Пока нет ставок. Будьте первым!</p>
+              <p>{{ auction.status === 'completed' ? 'Победителей нет' : 'Пока нет ставок. Будьте первым!' }}</p>
             </div>
           </div>
         </div>
@@ -310,6 +320,27 @@ onUnmounted(() => {
   border-radius: 16px;
 }
 
+.next-round-price {
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid rgba(0, 255, 136, 0.2);
+}
+
+.next-round-label {
+  font-size: 11px;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  display: block;
+  margin-bottom: 4px;
+}
+
+.next-round-value {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 18px;
+  font-weight: 600;
+  color: var(--accent-cyan);
+}
+
 .price-label {
   font-size: 12px;
   color: var(--text-muted);
@@ -356,6 +387,13 @@ onUnmounted(() => {
 .stat-label {
   font-size: 12px;
   color: var(--text-muted);
+}
+
+.stat-sublabel {
+  font-size: 11px;
+  color: var(--accent-cyan);
+  margin-top: 4px;
+  font-weight: 500;
 }
 
 .text-green { color: var(--accent-green); }
@@ -474,6 +512,14 @@ onUnmounted(() => {
   font-family: 'JetBrains Mono', monospace;
   font-weight: 500;
   color: var(--text-primary);
+}
+
+.bid-status {
+  font-size: 11px;
+  color: var(--accent-green);
+  font-weight: 600;
+  margin-left: auto;
+  padding-left: 12px;
 }
 
 .empty-bids {

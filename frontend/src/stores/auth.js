@@ -15,6 +15,8 @@ export const useAuthStore = defineStore('auth', () => {
       user.value = response.data.user
       localStorage.setItem('token', token.value)
       api.defaults.headers.common['Authorization'] = `Bearer ${token.value}`
+      // Загружаем полный профиль с балансами
+      await fetchProfile()
       return { success: true }
     } catch (error) {
       return { success: false, error: error.response?.data?.error || 'Ошибка входа' }
@@ -28,6 +30,8 @@ export const useAuthStore = defineStore('auth', () => {
       user.value = response.data.user
       localStorage.setItem('token', token.value)
       api.defaults.headers.common['Authorization'] = `Bearer ${token.value}`
+      // Загружаем полный профиль с балансами
+      await fetchProfile()
       return { success: true }
     } catch (error) {
       return { success: false, error: error.response?.data?.error || 'Ошибка регистрации' }
@@ -41,6 +45,8 @@ export const useAuthStore = defineStore('auth', () => {
       user.value = response.data.user
       localStorage.setItem('token', token.value)
       api.defaults.headers.common['Authorization'] = `Bearer ${token.value}`
+      // Загружаем полный профиль с балансами
+      await fetchProfile()
       return { success: true }
     } catch (error) {
       return { success: false, error: error.response?.data?.error || 'Ошибка авторизации через Telegram' }

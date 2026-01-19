@@ -95,6 +95,46 @@
       </div>
     </div>
 
+    <!-- Purchases -->
+    <div class="card">
+      <h2>🎁 Мои покупки</h2>
+      <div v-if="purchasesLoading" class="loading-state">
+        <div class="spinner"></div>
+      </div>
+      <div v-else-if="purchases.length === 0" class="empty-state">
+        <span>📭</span>
+        <p>Вы еще ничего не купили</p>
+      </div>
+      <div v-else class="purchases-table">
+        <table>
+          <thead>
+            <tr>
+              <th>Аукцион</th>
+              <th>Раунд</th>
+              <th>Серийный номер</th>
+              <th>Цена</th>
+              <th>Дата покупки</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr v-for="purchase in purchases" :key="purchase.id">
+              <td>
+                <router-link :to="`/auctions/${purchase.auctionId}`" class="auction-link">
+                  {{ purchase.auctionTitle }}
+                </router-link>
+              </td>
+              <td class="mono">#{{ purchase.roundNumber }}</td>
+              <td class="mono">#{{ purchase.serialNumber }}</td>
+              <td class="mono purchase-price">
+                {{ formatBalance(purchase.pricePaid, purchase.currency) }} {{ purchase.currency }}
+              </td>
+              <td class="tx-date">{{ formatTime(purchase.purchasedAt) }}</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
     <!-- Transactions -->
     <div class="card">
       <h2>📋 История транзакций</h2>
@@ -126,8 +166,8 @@
               <td>
                 <span class="currency-badge-small">{{ tx.currency }}</span>
               </td>
-              <td class="tx-amount" :class="getAmountClass(tx.type)">
-                {{ getAmountPrefix(tx.type) }}{{ formatBalance(tx.amount, tx.currency) }}
+              <td class="tx-amount" :class="getAmountClass(tx.type, tx.meta)">
+                {{ getAmountPrefix(tx.type, tx.meta) }}{{ formatBalance(tx.amount, tx.currency) }}
               </td>
               <td>
                 <span class="badge" :class="getStatusClass(tx.status)">
@@ -159,6 +199,8 @@ const withdrawAddress = ref('')
 const withdrawing = ref(false)
 const transactions = ref([])
 const transactionsLoading = ref(true)
+const purchases = ref([])
+const purchasesLoading = ref(true)
 
 const fetchProfile = async () => {
   try {
@@ -178,6 +220,18 @@ const fetchTransactions = async () => {
     console.error('Error fetching transactions:', err)
   } finally {
     transactionsLoading.value = false
+  }
+}
+
+const fetchPurchases = async () => {
+  try {
+    purchasesLoading.value = true
+    const response = await api.get('/purchases')
+    purchases.value = response.data
+  } catch (err) {
+    console.error('Error fetching purchases:', err)
+  } finally {
+    purchasesLoading.value = false
   }
 }
 
@@ -230,11 +284,12 @@ const withdraw = async () => {
 
 const getTransactionType = (type) => {
   const typeMap = {
-    deposit: 'Депозит',
-    withdrawal: 'Вывод',
-    bid_lock: 'Блокировка',
-    bid_refund: 'Возврат',
-    payout: 'Выплата'
+    deposit: 'Пополнение баланса',
+    withdrawal: 'Вывод средств',
+    bid_lock: 'Блокировка для ставки',
+    bid_refund: 'Возврат ставки',
+    payout: 'Покупка лота (выигрыш)',
+    admin_credit: 'Пополнение администратором'
   }
   return typeMap[type] || type
 }
@@ -245,7 +300,8 @@ const getTransactionIcon = (type) => {
     withdrawal: '📤',
     bid_lock: '🔒',
     bid_refund: '↩️',
-    payout: '🏆'
+    payout: '🏆',
+    admin_credit: '👑'
   }
   return iconMap[type] || '💰'
 }
@@ -256,17 +312,26 @@ const getTypeClass = (type) => {
     withdrawal: 'type-withdrawal',
     bid_lock: 'type-lock',
     bid_refund: 'type-refund',
-    payout: 'type-payout'
+    payout: 'type-payout',
+    admin_credit: 'type-admin'
   }
   return classMap[type] || ''
 }
 
-const getAmountClass = (type) => {
+const getAmountClass = (type, meta = null) => {
+  // Для admin_credit проверяем направление в meta
+  if (type === 'admin_credit') {
+    return meta?.direction === 'debit' ? 'amount-negative' : 'amount-positive'
+  }
   if (['deposit', 'bid_refund', 'payout'].includes(type)) return 'amount-positive'
   return 'amount-negative'
 }
 
-const getAmountPrefix = (type) => {
+const getAmountPrefix = (type, meta = null) => {
+  // Для admin_credit проверяем направление в meta
+  if (type === 'admin_credit') {
+    return meta?.direction === 'debit' ? '-' : '+'
+  }
   if (['deposit', 'bid_refund', 'payout'].includes(type)) return '+'
   return '-'
 }
@@ -289,6 +354,7 @@ const formatTime = (timeString) => {
 onMounted(() => {
   fetchProfile()
   fetchTransactions()
+  fetchPurchases()
 })
 </script>
 
@@ -407,6 +473,7 @@ onMounted(() => {
 .type-lock { color: var(--accent-orange); }
 .type-refund { color: var(--accent-cyan); }
 .type-payout { color: var(--accent-yellow); }
+.type-admin { color: var(--accent-purple); }
 
 .tx-amount {
   font-family: 'JetBrains Mono', monospace;
@@ -428,5 +495,54 @@ onMounted(() => {
 .tx-date {
   color: var(--text-muted);
   font-size: 13px;
+}
+
+.purchases-table {
+  overflow-x: auto;
+}
+
+.purchases-table table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.purchases-table th {
+  text-align: left;
+  padding: 12px;
+  font-size: 12px;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  border-bottom: 1px solid var(--border-color);
+}
+
+.purchases-table td {
+  padding: 12px;
+  border-bottom: 1px solid var(--border-color);
+}
+
+.purchases-table tr:hover {
+  background: var(--bg-secondary);
+}
+
+.auction-link {
+  color: var(--accent-cyan);
+  text-decoration: none;
+  font-weight: 500;
+  transition: color 0.2s;
+}
+
+.auction-link:hover {
+  color: var(--accent-green);
+  text-decoration: underline;
+}
+
+.purchase-price {
+  font-family: 'JetBrains Mono', monospace;
+  font-weight: 600;
+  color: var(--accent-green);
+}
+
+.mono {
+  font-family: 'JetBrains Mono', monospace;
 }
 </style>

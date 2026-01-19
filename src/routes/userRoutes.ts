@@ -2,6 +2,8 @@ import { Router } from "express";
 import { z } from "zod";
 import { User } from "../models/User";
 import { Transaction } from "../models/Transaction";
+import { Item } from "../models/Item";
+import { Auction } from "../models/Auction";
 import { requireAuth } from "../middleware/auth";
 import { asyncHandler } from "../utils/asyncHandler";
 import { badRequest, notFound } from "../utils/errors";
@@ -163,8 +165,36 @@ router.get(
         status: tx.status,
         provider: tx.provider ?? null,
         externalId: tx.externalId ?? null,
+        meta: tx.meta ?? null,
         createdAt: tx.createdAt,
       }))
+    );
+  })
+);
+
+router.get(
+  "/purchases",
+  requireAuth,
+  asyncHandler(async (req, res) => {
+    const items = await Item.find({ winnerUserId: req.user?.id })
+      .populate("auctionId", "title currency")
+      .sort({ createdAt: -1 })
+      .lean();
+    
+    res.json(
+      items.map((item) => {
+        const auction = item.auctionId as { _id: any; title: string; currency: Currency };
+        return {
+          id: item._id.toString(),
+          auctionId: auction._id.toString(),
+          auctionTitle: auction.title,
+          currency: auction.currency,
+          roundNumber: item.roundNumber,
+          serialNumber: item.serialNumber,
+          pricePaid: unitsToAmount(unitsFromString(item.pricePaid), auction.currency),
+          purchasedAt: item.createdAt,
+        };
+      })
     );
   })
 );
