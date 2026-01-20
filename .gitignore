@@ -7,3 +7,4 @@ tests/selenium/pages/__pycache__
 tests/selenium/screenshots
 tests/selenium/tests/__pycache__
 tests/selenium/utils/__pycache__
+tests/selenium/venv

@@ -10,8 +10,11 @@ import logging
 from datetime import datetime
 from selenium import webdriver
 from selenium.webdriver.chrome.options import Options as ChromeOptions
+from selenium.webdriver.chrome.service import Service as ChromeService
 from selenium.webdriver.firefox.options import Options as FirefoxOptions
+from selenium.webdriver.firefox.service import Service as FirefoxService
 from selenium.webdriver.edge.options import Options as EdgeOptions
+from selenium.webdriver.edge.service import Service as EdgeService
 from dotenv import load_dotenv
 from faker import Faker
 
@@ -254,62 +257,84 @@ def _create_driver(browser: str, headless: bool):
     """
     Создать экземпляр WebDriver.
     Selenium Manager автоматически скачивает нужный драйвер (Selenium 4.6+).
+    Явно используем Service для игнорирования устаревших драйверов в PATH.
     """
+    # Временно удаляем chromedriver из PATH для Chrome, чтобы Selenium Manager
+    # использовал автоматически скачанный драйвер вместо устаревшего в PATH
+    original_path = None
     if browser == "chrome":
-        options = ChromeOptions()
-        if headless:
-            options.add_argument("--headless=new")
-        options.add_argument("--window-size=1920,1080")
-        options.add_argument("--disable-gpu")
-        options.add_argument("--no-sandbox")
-        options.add_argument("--disable-dev-shm-usage")
-        options.add_argument("--disable-extensions")
-        options.add_argument("--disable-popup-blocking")
-        options.add_argument("--disable-infobars")
-        options.add_argument("--no-first-run")
-        options.add_argument("--no-default-browser-check")
-        options.add_argument("--disable-notifications")
-        options.add_argument("--disable-save-password-bubble")
-        
-        # Отключаем проверку паролей и предупреждения безопасности
-        prefs = {
-            "credentials_enable_service": False,
-            "profile.password_manager_enabled": False,
-            "profile.password_manager_leak_detection": False,
-            "safebrowsing.enabled": False,
-            "autofill.profile_enabled": False,
-        }
-        options.add_experimental_option("prefs", prefs)
-        options.add_experimental_option("excludeSwitches", ["enable-logging", "enable-automation"])
-        options.add_experimental_option("useAutomationExtension", False)
+        original_path = os.environ.get("PATH", "")
+        # Удаляем C:\chromedriver_win32 из PATH если он там есть
+        path_dirs = original_path.split(os.pathsep)
+        path_dirs = [d for d in path_dirs if "chromedriver" not in d.lower()]
+        os.environ["PATH"] = os.pathsep.join(path_dirs)
+    
+    try:
+        if browser == "chrome":
+            options = ChromeOptions()
+            if headless:
+                options.add_argument("--headless=new")
+            options.add_argument("--window-size=1920,1080")
+            options.add_argument("--disable-gpu")
+            options.add_argument("--no-sandbox")
+            options.add_argument("--disable-dev-shm-usage")
+            options.add_argument("--disable-extensions")
+            options.add_argument("--disable-popup-blocking")
+            options.add_argument("--disable-infobars")
+            options.add_argument("--no-first-run")
+            options.add_argument("--no-default-browser-check")
+            options.add_argument("--disable-notifications")
+            options.add_argument("--disable-save-password-bubble")
+            
+            # Отключаем проверку паролей и предупреждения безопасности
+            prefs = {
+                "credentials_enable_service": False,
+                "profile.password_manager_enabled": False,
+                "profile.password_manager_leak_detection": False,
+                "safebrowsing.enabled": False,
+                "autofill.profile_enabled": False,
+            }
+            options.add_experimental_option("prefs", prefs)
+            options.add_experimental_option("excludeSwitches", ["enable-logging", "enable-automation"])
+            options.add_experimental_option("useAutomationExtension", False)
 
-        # Selenium Manager сам найдёт/скачает chromedriver
-        driver = webdriver.Chrome(options=options)
+            # Используем Service без указания пути - Selenium Manager автоматически скачает нужный драйвер
+            # Это игнорирует устаревшие драйверы в PATH
+            service = ChromeService()
+            driver = webdriver.Chrome(service=service, options=options)
+            
+        elif browser == "firefox":
+            options = FirefoxOptions()
+            if headless:
+                options.add_argument("--headless")
+            options.add_argument("--width=1920")
+            options.add_argument("--height=1080")
+            
+            # Используем Service для Firefox
+            service = FirefoxService()
+            driver = webdriver.Firefox(service=service, options=options)
+            
+        elif browser == "edge":
+            options = EdgeOptions()
+            if headless:
+                options.add_argument("--headless=new")
+            options.add_argument("--window-size=1920,1080")
+            
+            # Используем Service для Edge
+            service = EdgeService()
+            driver = webdriver.Edge(service=service, options=options)
+            
+        else:
+            raise ValueError(f"Unsupported browser: {browser}")
         
-    elif browser == "firefox":
-        options = FirefoxOptions()
-        if headless:
-            options.add_argument("--headless")
-        options.add_argument("--width=1920")
-        options.add_argument("--height=1080")
+        driver.implicitly_wait(10)
+        driver.set_page_load_timeout(30)
         
-        driver = webdriver.Firefox(options=options)
-        
-    elif browser == "edge":
-        options = EdgeOptions()
-        if headless:
-            options.add_argument("--headless=new")
-        options.add_argument("--window-size=1920,1080")
-        
-        driver = webdriver.Edge(options=options)
-        
-    else:
-        raise ValueError(f"Unsupported browser: {browser}")
-    
-    driver.implicitly_wait(10)
-    driver.set_page_load_timeout(30)
-    
-    return driver
+        return driver
+    finally:
+        # Восстанавливаем оригинальный PATH
+        if original_path is not None:
+            os.environ["PATH"] = original_path
 
 
 @pytest.fixture(scope="function")
