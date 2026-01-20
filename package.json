@@ -10,7 +10,8 @@
     "start": "node dist/index.js",
     "load-test": "tsx scripts/load-test.ts",
     "stress-test": "tsx scripts/stress-test.ts",
-    "auto-test": "tsx scripts/auto-test.ts"
+    "auto-test": "tsx scripts/auto-test.ts",
+    "simulate-bidding": "tsx scripts/simulate-bidding.ts"
   },
   "dependencies": {
     "bcryptjs": "^3.0.2",

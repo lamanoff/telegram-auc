@@ -233,8 +233,33 @@ const setupWebSocket = () => {
     auction.value = data
   })
   
-  ws.value.on('bid.updated', () => {
-    fetchAuction()
+  ws.value.on('bid.updated', (data) => {
+    if (!data) return
+    
+    // Мгновенно обновляем минимальную ставку из WebSocket события
+    if (data.currentMinBid) {
+      auction.value.currentMinBid = data.currentMinBid
+    }
+    
+    // Обновляем топ ставки, если они есть в событии
+    if (data.topBids && Array.isArray(data.topBids) && data.topBids.length > 0) {
+      // Преобразуем формат: используем user из данных или создаем из userId
+      auction.value.topBids = data.topBids.map(bid => ({
+        rank: bid.rank,
+        amount: bid.amount,
+        user: bid.user || (bid.userId ? `user_${bid.userId.slice(-8)}` : 'unknown'),
+        userId: bid.userId
+      }))
+    }
+    
+    // Также делаем полный fetch для обновления всех данных (но с меньшим приоритетом)
+    // Используем debounce, чтобы не делать слишком много запросов
+    if (window.bidUpdateTimeout) {
+      clearTimeout(window.bidUpdateTimeout)
+    }
+    window.bidUpdateTimeout = setTimeout(() => {
+      fetchAuction()
+    }, 1500) // Задержка 1.5 секунды для накопления нескольких обновлений
   })
   
   ws.value.on('round.closed', (data) => {
@@ -251,9 +276,11 @@ onMounted(async () => {
   await fetchAuction()
   setupWebSocket()
   
+  // Уменьшаем интервал обновления до 2 секунд для более быстрого обновления
+  // WebSocket события обновляют данные мгновенно, интервал - только для синхронизации
   interval = setInterval(() => {
     fetchAuction()
-  }, 5000)
+  }, 2000)
 })
 
 onUnmounted(() => {

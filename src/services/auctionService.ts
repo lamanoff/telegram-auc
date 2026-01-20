@@ -409,7 +409,7 @@ export async function placeBid(params: {
   currentMinBid: string; 
   roundEndsAt?: Date; 
   outbidUserIds?: string[];
-  topBids: Array<{ rank: number; userId: string; amount: string }>;
+  topBids: Array<{ rank: number; userId: string; amount: string; user: string }>;
 } | null> {
   if (!mongoose.Types.ObjectId.isValid(params.auctionId) || !mongoose.Types.ObjectId.isValid(params.userId)) {
     throw badRequest("Invalid ID format");
@@ -573,9 +573,19 @@ export async function placeBid(params: {
       const refreshedTopBids = await Bid.find({ auctionId: auction._id, status: "active" })
         .sort({ amountSort: -1, lastBidAt: 1 })
         .limit(cutoffSize)
+        .populate("userId", "username")
         .session(session)
         .lean();
-      const refreshedTopUserIds = refreshedTopBids.map((bid) => bid.userId.toString());
+      const refreshedTopUserIds = refreshedTopBids.map((bid) => {
+        const user = bid.userId as { _id: mongoose.Types.ObjectId; username?: string } | mongoose.Types.ObjectId | string;
+        if (typeof user === 'string') {
+          return user;
+        }
+        if (user && typeof user === 'object' && '_id' in user) {
+          return user._id.toString();
+        }
+        return (user as mongoose.Types.ObjectId).toString();
+      });
       const outbidUserIds = previousTopUserIds.filter((userId) => !refreshedTopUserIds.includes(userId));
       const refreshedMinUnits = computeMinRequiredUnits(
         { 
@@ -594,11 +604,32 @@ export async function placeBid(params: {
         currentMinBid: unitsToAmount(refreshedMinUnits, auction.currency as Currency),
         roundEndsAt: auction.roundEndsAt ?? undefined,
         outbidUserIds,
-        topBids: refreshedTopBids.map((bid, index) => ({
-          rank: index + 1,
-          userId: bid.userId.toString(),
-          amount: unitsToAmount(unitsFromString(bid.amount), auction.currency as Currency),
-        })),
+        topBids: refreshedTopBids.map((bid, index) => {
+          const userRaw: unknown = bid.userId;
+          let userId: string;
+          let username: string;
+          
+          // Проверяем тип после populate
+          if (typeof userRaw === 'string') {
+            userId = userRaw;
+            username = `user_${userRaw.slice(-8)}`;
+          } else if (userRaw && typeof userRaw === 'object' && userRaw !== null && '_id' in userRaw) {
+            const user = userRaw as { _id: mongoose.Types.ObjectId; username?: string };
+            userId = user._id.toString();
+            username = user.username ?? userId;
+          } else {
+            const objId = userRaw as mongoose.Types.ObjectId;
+            userId = objId.toString();
+            username = `user_${userId.slice(-8)}`;
+          }
+          
+          return {
+            rank: index + 1,
+            userId,
+            amount: unitsToAmount(unitsFromString(bid.amount), auction.currency as Currency),
+            user: username,
+          };
+        }),
       };
     });
   } catch (error) {
@@ -618,7 +649,7 @@ export async function placeBid(params: {
     currentMinBid: string; 
     roundEndsAt?: Date; 
     outbidUserIds?: string[];
-    topBids: Array<{ rank: number; userId: string; amount: string }>;
+    topBids: Array<{ rank: number; userId: string; amount: string; user: string }>;
   };
   
   const result = payload as BidPayload | null;
