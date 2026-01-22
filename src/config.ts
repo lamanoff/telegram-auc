@@ -41,7 +41,6 @@ export const config = {
   antiSnipingExtendSec: Number(process.env.ANTI_SNIPING_EXTEND_SEC ?? "30"),
   cryptoBotApiBase: process.env.CRYPTOBOT_API_BASE ?? "https://pay.crypt.bot/api",
   cryptoBotToken: process.env.CRYPTOBOT_TOKEN ?? "",
-  cryptoBotWebhookSecret: process.env.CRYPTOBOT_WEBHOOK_SECRET ?? "",
   telegramBotToken: process.env.TELEGRAM_BOT_TOKEN ?? "",
   telegramBotUsername: process.env.TELEGRAM_BOT_USERNAME ?? "",
   redisUrl: process.env.REDIS_URL ?? "redis://redis:6379",

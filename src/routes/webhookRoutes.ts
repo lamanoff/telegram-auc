@@ -32,17 +32,19 @@ router.post(
       throw badRequest("Payload too large");
     }
     
-    if (!verifyWebhookSignature(rawBody, signature)) {
-      console.error(`[Webhook] Invalid signature: hasSignature=${hasSignature}, bodyLength=${bodyLength}`);
-      throw badRequest("Invalid signature");
-    }
-    
+    // Парсим JSON перед проверкой подписи (нужен для правильной сериализации)
     let payload;
     try {
       payload = JSON.parse(rawBody.toString());
     } catch (e) {
       console.error(`[Webhook] Invalid JSON: ${e instanceof Error ? e.message : 'Unknown error'}, body=${bodyPreview}`);
       throw badRequest("Invalid JSON");
+    }
+    
+    // Проверяем подпись используя распарсенный payload (CryptoBot использует JSON.stringify для подписи)
+    if (!verifyWebhookSignature(payload, signature)) {
+      console.error(`[Webhook] Invalid signature: hasSignature=${hasSignature}, bodyLength=${bodyLength}`);
+      throw badRequest("Invalid signature");
     }
     
     const event = payload.payload ?? payload;

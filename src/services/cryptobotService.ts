@@ -104,64 +104,50 @@ export async function createInvoice(params: {
   };
 }
 
-export function verifyWebhookSignature(rawBody: Buffer, signature?: string) {
-  if (!config.cryptoBotWebhookSecret) {
+export function verifyWebhookSignature(body: any, signature?: string) {
+  // Если токен не установлен, пропускаем проверку (для разработки)
+  if (!config.cryptoBotToken) {
     if (process.env.NODE_ENV !== 'production') {
-      console.log(`[Webhook] CRYPTOBOT_WEBHOOK_SECRET not set, skipping signature verification`);
+      console.log(`[Webhook] CRYPTOBOT_TOKEN not set, skipping signature verification`);
     }
     return true;
   }
+  
   if (!signature) {
-    console.error(`[Webhook] No signature header provided, but CRYPTOBOT_WEBHOOK_SECRET is set`);
+    console.error(`[Webhook] No signature header provided, but CRYPTOBOT_TOKEN is set`);
     return false;
   }
   
-  // Вычисляем ожидаемую подпись в hex формате
-  const digestHex = crypto
-    .createHmac("sha256", config.cryptoBotWebhookSecret)
-    .update(rawBody)
+  // Алгоритм проверки подписи CryptoBot:
+  // 1. Секрет = SHA256(токен)
+  // 2. Сериализуем тело через JSON.stringify
+  // 3. HMAC-SHA256(секрет, сериализованное_тело) в hex
+  // 4. Сравниваем с заголовком crypto-pay-api-signature
+  
+  const secret = crypto
+    .createHash("sha256")
+    .update(config.cryptoBotToken)
+    .digest();
+  
+  const checkString = JSON.stringify(body);
+  
+  const hmac = crypto
+    .createHmac("sha256", secret)
+    .update(checkString)
     .digest("hex");
   
-  // Вычисляем ожидаемую подпись в base64 формате (на случай, если CryptoBot отправляет в base64)
-  const digestBase64 = crypto
-    .createHmac("sha256", config.cryptoBotWebhookSecret)
-    .update(rawBody)
-    .digest("base64");
-  
-  // Убираем пробелы и переносы строк из подписи
   const cleanSignature = signature.trim();
-  
-  // Проверяем hex формат (64 символа для SHA256)
-  let isValidHex = false;
-  if (cleanSignature.length === digestHex.length) {
-    isValidHex = crypto.timingSafeEqual(
-      Buffer.from(digestHex),
-      Buffer.from(cleanSignature)
-    );
-  }
-  
-  // Проверяем base64 формат (44 символа для SHA256)
-  let isValidBase64 = false;
-  if (cleanSignature.length === digestBase64.length) {
-    isValidBase64 = crypto.timingSafeEqual(
-      Buffer.from(digestBase64),
-      Buffer.from(cleanSignature)
-    );
-  }
-  
-  const isValid = isValidHex || isValidBase64;
+  const isValid = hmac === cleanSignature;
   
   if (!isValid) {
     console.error(`[Webhook] Signature verification failed`, {
       signatureLength: cleanSignature.length,
-      expectedHexLength: digestHex.length,
-      expectedBase64Length: digestBase64.length,
+      expectedLength: hmac.length,
       signaturePreview: cleanSignature.substring(0, 20),
-      expectedHexPreview: digestHex.substring(0, 20),
-      expectedBase64Preview: digestBase64.substring(0, 20),
+      expectedPreview: hmac.substring(0, 20),
     });
   } else if (process.env.NODE_ENV !== 'production') {
-    console.log(`[Webhook] Signature verified successfully (format: ${isValidHex ? 'hex' : 'base64'})`);
+    console.log(`[Webhook] Signature verified successfully`);
   }
   
   return isValid;

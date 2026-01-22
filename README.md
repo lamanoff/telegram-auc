@@ -232,8 +232,7 @@ cp env.example .env
 - `JWT_SECRET` - Секретный ключ для JWT (минимум 32 символа). Для тестирования можно использовать любой длинный случайный ключ.
 
 **Опциональные переменные (для полного функционала):**
-- `CRYPTOBOT_TOKEN` - Токен CryptoBot API
-- `CRYPTOBOT_WEBHOOK_SECRET` - Секрет для верификации webhook от CryptoBot
+- `CRYPTOBOT_TOKEN` - Токен CryptoBot API (подпись webhook проверяется автоматически через токен)
 - `TELEGRAM_BOT_TOKEN` - Токен Telegram бота (если используется Telegram авторизация)
 
 **Для получения CryptoBot токена:**
@@ -248,7 +247,6 @@ JWT_SECRET=your_super_secret_jwt_key_minimum_32_characters_long
 MONGO_URI=mongodb://mongo:27017/auction
 REDIS_URL=redis://redis:6379
 CRYPTOBOT_TOKEN=123456:ABC-DEF1234ghIkl-zyx57W2v1u123ew11
-CRYPTOBOT_WEBHOOK_SECRET=your_webhook_secret_here
 PORT=3000
 ```
 
@@ -731,8 +729,7 @@ docker exec -it auction-redis redis-cli INFO stats
 - `JWT_SECRET` - Секретный ключ для JWT (минимум 32 символа)
 - `MONGO_URI` - URI подключения к MongoDB
 - `REDIS_URL` - URL подключения к Redis
-- `CRYPTOBOT_TOKEN` - Токен CryptoBot API (опционально)
-- `CRYPTOBOT_WEBHOOK_SECRET` - Секрет для верификации webhook (опционально)
+- `CRYPTOBOT_TOKEN` - Токен CryptoBot API (опционально, подпись webhook проверяется автоматически через токен)
 - `TELEGRAM_BOT_TOKEN` - Токен Telegram бота от BotFather (опционально, для Telegram виджета)
 - `TELEGRAM_BOT_USERNAME` - Username бота без @ (опционально, для Telegram виджета)
 - `FRONTEND_URL` - URL фронтенда для CORS (можно несколько через запятую)
