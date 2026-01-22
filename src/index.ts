@@ -62,6 +62,9 @@ async function bootstrap() {
     allowedHeaders: ['Content-Type', 'Authorization'],
   }));
 
+  // Применяем express.raw() только к webhook пути ДО express.json()
+  app.use("/api/webhook/cryptobot", express.raw({ type: "application/json", limit: "100kb" }));
+  
   // Webhook роуты должны быть ДО express.json(), чтобы получить raw body для проверки подписи
   app.use("/api", webhookRoutes);
 

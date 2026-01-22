@@ -1,38 +1,10 @@
-import { Router, Request, Response, NextFunction } from "express";
+import { Router } from "express";
+import express from "express";
 import { asyncHandler } from "../utils/asyncHandler";
 import { handleInvoicePaid, verifyWebhookSignature } from "../services/cryptobotService";
 import { badRequest } from "../utils/errors";
 
 const router = Router();
-
-// Middleware для чтения raw body
-function rawBodyMiddleware(req: Request, res: Response, next: NextFunction) {
-  if (req.method !== 'POST') {
-    return next();
-  }
-  
-  const maxSize = 100 * 1024; // 100KB
-  let totalSize = 0;
-  const chunks: Buffer[] = [];
-  
-  req.on('data', (chunk: Buffer) => {
-    totalSize += chunk.length;
-    if (totalSize > maxSize) {
-      req.destroy();
-      return next(badRequest("Payload too large"));
-    }
-    chunks.push(chunk);
-  });
-  
-  req.on('end', () => {
-    (req as any).rawBody = Buffer.concat(chunks);
-    next();
-  });
-  
-  req.on('error', (err) => {
-    next(err);
-  });
-}
 
 // GET endpoint для проверки доступности вебхука (CryptoBot проверяет доступность перед настройкой)
 router.get("/webhook/cryptobot", (_req, res) => {
@@ -41,35 +13,53 @@ router.get("/webhook/cryptobot", (_req, res) => {
 
 router.post(
   "/webhook/cryptobot",
-  rawBodyMiddleware,
   asyncHandler(async (req, res) => {
-    const rawBody = (req as any).rawBody as Buffer;
-    
-    // Проверяем, что rawBody действительно Buffer
-    if (!Buffer.isBuffer(rawBody)) {
-      console.error(`[Webhook] Body is not a Buffer, got: ${typeof rawBody}`, { 
-        isBuffer: Buffer.isBuffer(rawBody),
-        bodyType: typeof rawBody,
-        bodyConstructor: rawBody?.constructor?.name,
-        hasRawBody: !!(req as any).rawBody
-      });
-      throw badRequest("Invalid request body format");
-    }
+    const rawBody = req.body as Buffer;
     
     // Логирование для диагностики
     const signature = req.headers["crypto-pay-api-signature"] as string | undefined;
     const hasSignature = !!signature;
+    
+    // Проверяем, что rawBody действительно Buffer
+    if (!Buffer.isBuffer(rawBody)) {
+      console.error(`[Webhook] Body is not a Buffer`, { 
+        isBuffer: Buffer.isBuffer(rawBody),
+        bodyType: typeof rawBody,
+        bodyConstructor: rawBody?.constructor?.name,
+        hasRawBody: !!(req as any).rawBody,
+        rawBodyValue: rawBody,
+        reqBodyType: typeof req.body,
+        reqBody: req.body
+      });
+      throw badRequest("Invalid request body format");
+    }
+    
     const bodyLength = rawBody.length;
     const bodyString = rawBody.toString('utf8');
     const bodyPreview = bodyString.substring(0, 200);
     
-    if (process.env.NODE_ENV !== 'production') {
-      console.log(`[Webhook] Received request: bodyLength=${bodyLength}, hasSignature=${hasSignature}, preview=${bodyPreview}`);
-    }
+    console.log(`[Webhook] Received request: bodyLength=${bodyLength}, hasSignature=${hasSignature}`, {
+      bodyPreview,
+      firstChars: bodyString.substring(0, 50),
+      isBuffer: Buffer.isBuffer(rawBody),
+      bodyStringType: typeof bodyString,
+      bodyStringLength: bodyString.length
+    });
     
     if (rawBody.length > 100000) {
       console.error(`[Webhook] Payload too large: ${rawBody.length} bytes`);
       throw badRequest("Payload too large");
+    }
+    
+    if (!bodyString || bodyString === '[object Object]' || bodyString.trim().length === 0) {
+      console.error(`[Webhook] Invalid body string`, {
+        bodyString,
+        bodyStringType: typeof bodyString,
+        bodyStringLength: bodyString?.length,
+        rawBodyLength: rawBody.length,
+        rawBodyType: typeof rawBody
+      });
+      throw badRequest("Invalid request body");
     }
     
     // Парсим JSON перед проверкой подписи (нужен для правильной сериализации)
@@ -77,10 +67,12 @@ router.post(
     try {
       payload = JSON.parse(bodyString);
     } catch (e) {
-      console.error(`[Webhook] Invalid JSON: ${e instanceof Error ? e.message : 'Unknown error'}`, {
+      console.error(`[Webhook] Invalid JSON`, {
+        error: e instanceof Error ? e.message : String(e),
         bodyPreview,
         bodyLength,
-        error: e instanceof Error ? e.message : String(e)
+        bodyString: bodyString.substring(0, 500),
+        bodyStringType: typeof bodyString
       });
       throw badRequest("Invalid JSON");
     }
