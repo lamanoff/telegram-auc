@@ -6,6 +6,11 @@ import { badRequest } from "../utils/errors";
 
 const router = Router();
 
+// GET endpoint для проверки доступности вебхука (CryptoBot проверяет доступность перед настройкой)
+router.get("/webhook/cryptobot", (_req, res) => {
+  res.json({ ok: true, message: "Webhook endpoint is available" });
+});
+
 router.post(
   "/webhook/cryptobot",
   express.raw({ type: "application/json", limit: "100kb" }),
