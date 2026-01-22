@@ -17,11 +17,22 @@ router.post(
   asyncHandler(async (req, res) => {
     const rawBody = req.body as Buffer;
     
+    // Проверяем, что rawBody действительно Buffer
+    if (!Buffer.isBuffer(rawBody)) {
+      console.error(`[Webhook] Body is not a Buffer, got: ${typeof rawBody}`, { 
+        isBuffer: Buffer.isBuffer(rawBody),
+        bodyType: typeof rawBody,
+        bodyConstructor: rawBody?.constructor?.name 
+      });
+      throw badRequest("Invalid request body format");
+    }
+    
     // Логирование для диагностики
     const signature = req.headers["crypto-pay-api-signature"] as string | undefined;
     const hasSignature = !!signature;
     const bodyLength = rawBody.length;
-    const bodyPreview = rawBody.toString().substring(0, 200);
+    const bodyString = rawBody.toString('utf8');
+    const bodyPreview = bodyString.substring(0, 200);
     
     if (process.env.NODE_ENV !== 'production') {
       console.log(`[Webhook] Received request: bodyLength=${bodyLength}, hasSignature=${hasSignature}, preview=${bodyPreview}`);
@@ -35,9 +46,13 @@ router.post(
     // Парсим JSON перед проверкой подписи (нужен для правильной сериализации)
     let payload;
     try {
-      payload = JSON.parse(rawBody.toString());
+      payload = JSON.parse(bodyString);
     } catch (e) {
-      console.error(`[Webhook] Invalid JSON: ${e instanceof Error ? e.message : 'Unknown error'}, body=${bodyPreview}`);
+      console.error(`[Webhook] Invalid JSON: ${e instanceof Error ? e.message : 'Unknown error'}`, {
+        bodyPreview,
+        bodyLength,
+        error: e instanceof Error ? e.message : String(e)
+      });
       throw badRequest("Invalid JSON");
     }
     

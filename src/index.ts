@@ -62,10 +62,11 @@ async function bootstrap() {
     allowedHeaders: ['Content-Type', 'Authorization'],
   }));
 
+  // Webhook роуты должны быть ДО express.json(), чтобы получить raw body для проверки подписи
+  app.use("/api", webhookRoutes);
+
   app.use(express.json({ limit: "1mb" }));
   app.use(rateLimitMiddleware);
-  
-  app.use("/api", webhookRoutes);
 
   app.get("/health", (_req, res) => res.json({ status: "ok" }));
 
