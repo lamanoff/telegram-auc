@@ -13,7 +13,7 @@ docker-compose up -d
 ```
 
 После запуска:
-- Frontend: http://localhost
+- Frontend: http://localhost (или http://127.0.0.1 для Telegram виджета)
 - Backend API: http://localhost:3000
 - Админ панель: http://localhost/admin
 
@@ -22,6 +22,31 @@ docker-compose up -d
 - Пароль: `admin123`
 
 > Измените пароль админа в продакшене через переменные `ADMIN_USERNAME` и `ADMIN_PASSWORD`
+
+### Настройка Telegram виджета для локального тестирования
+
+Платформа поддерживает аутентификацию через Telegram Login Widget. Для локального тестирования необходимо:
+
+1. **Создайте бота через [@BotFather](https://t.me/BotFather)** в Telegram:
+   - Отправьте команду `/newbot` и следуйте инструкциям
+   - Сохраните полученный токен
+
+2. **Настройте домен в BotFather:**
+   - Отправьте команду `/setdomain` боту BotFather
+   - Выберите вашего бота
+   - **Укажите домен: `127.0.0.1`** (не `localhost` — BotFather не принимает localhost)
+   - Также можно указать порт: `127.0.0.1:80` или `127.0.0.1:3000` (в зависимости от вашей конфигурации)
+
+3. **Настройте переменные окружения:**
+   - Создайте файл `.env` (скопируйте из `env.example`)
+   - Укажите `TELEGRAM_BOT_TOKEN` — токен бота от BotFather
+   - Укажите `TELEGRAM_BOT_USERNAME` — username вашего бота (без @)
+
+4. **Запустите проект и заходите по IP-адресу:**
+   - Используйте `http://127.0.0.1` вместо `http://localhost`
+   - Telegram виджет будет работать только при доступе через указанный в BotFather домен
+
+**Важно:** Для продакшена укажите ваш реальный домен в BotFather (например, `yourdomain.com`).
 
 ## Возможности
 
@@ -93,9 +118,17 @@ docker-compose up -d
 - **MongoDB транзакции**: Гарантия консистентности финансовых операций
 - **WebSocket**: Мгновенные обновления без polling
 
+### Аутентификация
+
+- **JWT аутентификация** с валидацией формата
+- **Telegram Login Widget** — вход через Telegram без пароля
+- Автоматическое создание аккаунта при первом входе через Telegram
+- Связывание Telegram аккаунта с существующим пользователем
+
 ### Безопасность
 
 - JWT аутентификация с валидацией формата
+- Верификация Telegram данных через HMAC-SHA256
 - Rate limiting на всех критичных эндпоинтах
 - Валидация всех входных данных через Zod
 - Защита от NoSQL инъекций через валидацию ObjectId
@@ -695,12 +728,15 @@ docker exec -it auction-redis redis-cli INFO stats
 ## Конфигурация
 
 Переменные окружения (файл `.env`):
-- `JWT_SECRET` - Секретный ключ для JWT
+- `JWT_SECRET` - Секретный ключ для JWT (минимум 32 символа)
 - `MONGO_URI` - URI подключения к MongoDB
 - `REDIS_URL` - URL подключения к Redis
-- `CRYPTOBOT_TOKEN` - Токен CryptoBot API
-- `CRYPTOBOT_WEBHOOK_SECRET` - Секрет для верификации webhook
-- `TELEGRAM_BOT_TOKEN` - Токен Telegram бота
+- `CRYPTOBOT_TOKEN` - Токен CryptoBot API (опционально)
+- `CRYPTOBOT_WEBHOOK_SECRET` - Секрет для верификации webhook (опционально)
+- `TELEGRAM_BOT_TOKEN` - Токен Telegram бота от BotFather (опционально, для Telegram виджета)
+- `TELEGRAM_BOT_USERNAME` - Username бота без @ (опционально, для Telegram виджета)
+- `FRONTEND_URL` - URL фронтенда для CORS (можно несколько через запятую)
+- `PORT` - Порт сервера (по умолчанию 3000)
 
 ## Архитектура
 
