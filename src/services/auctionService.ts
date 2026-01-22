@@ -27,6 +27,7 @@ export async function listAuctions() {
   return auctions.map((auction) => ({
     id: auction._id.toString(),
     title: auction.title,
+    description: auction.description,
     currency: auction.currency,
     status: auction.status,
     startTime: auction.startTime,

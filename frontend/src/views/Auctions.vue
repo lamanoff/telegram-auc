@@ -54,6 +54,14 @@
           </div>
         </div>
         
+        <div v-if="auction.status === 'scheduled' && auction.startTime" class="countdown-section">
+          <div class="countdown-icon">⏰</div>
+          <div class="countdown-info">
+            <span class="countdown-label">До начала</span>
+            <span class="countdown-value">{{ getCountdown(auction.startTime) }}</span>
+          </div>
+        </div>
+        
         <router-link :to="`/auctions/${auction.id}`" class="btn btn-primary btn-full mt-2">
           <span>📊</span> Подробнее
         </router-link>
@@ -71,7 +79,9 @@ const authStore = useAuthStore()
 const auctions = ref([])
 const loading = ref(true)
 const error = ref('')
+const now = ref(new Date())
 let interval = null
+let countdownInterval = null
 
 const fetchAuctions = async () => {
   try {
@@ -105,13 +115,44 @@ const getStatusBadgeClass = (status) => {
   return classMap[status] || ''
 }
 
+const getCountdown = (startTime) => {
+  if (!startTime) return ''
+  
+  // Используем реактивную переменную now для автоматического обновления
+  const start = new Date(startTime)
+  const diff = start - now.value
+  
+  if (diff <= 0) {
+    return 'Скоро начнётся...'
+  }
+  
+  const days = Math.floor(diff / (1000 * 60 * 60 * 24))
+  const hours = Math.floor((diff % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60))
+  const minutes = Math.floor((diff % (1000 * 60 * 60)) / (1000 * 60))
+  const seconds = Math.floor((diff % (1000 * 60)) / 1000)
+  
+  const parts = []
+  if (days > 0) parts.push(`${days} ${days === 1 ? 'д' : days < 5 ? 'д' : 'д'}`)
+  if (hours > 0 || days > 0) parts.push(`${hours} ${hours === 1 ? 'ч' : 'ч'}`)
+  if (minutes > 0 || hours > 0 || days > 0) parts.push(`${minutes} ${minutes === 1 ? 'м' : 'м'}`)
+  parts.push(`${seconds} ${seconds === 1 ? 'с' : 'с'}`)
+  
+  return parts.join(' ')
+}
+
 onMounted(() => {
   fetchAuctions()
   interval = setInterval(fetchAuctions, 5000)
+  
+  // Обновляем таймеры каждую секунду для более точного отображения
+  countdownInterval = setInterval(() => {
+    now.value = new Date()
+  }, 1000)
 })
 
 onUnmounted(() => {
   if (interval) clearInterval(interval)
+  if (countdownInterval) clearInterval(countdownInterval)
 })
 </script>
 
@@ -249,6 +290,41 @@ onUnmounted(() => {
   font-size: 11px;
   color: var(--text-muted);
   text-transform: uppercase;
+}
+
+.countdown-section {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 16px;
+  background: rgba(59, 130, 246, 0.1);
+  border: 1px solid rgba(59, 130, 246, 0.2);
+  border-radius: 12px;
+  margin-bottom: 16px;
+}
+
+.countdown-icon {
+  font-size: 24px;
+}
+
+.countdown-info {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+}
+
+.countdown-label {
+  font-size: 11px;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  margin-bottom: 2px;
+}
+
+.countdown-value {
+  font-family: 'JetBrains Mono', monospace;
+  font-weight: 600;
+  color: var(--accent-cyan);
+  font-size: 14px;
 }
 
 .btn-full {
