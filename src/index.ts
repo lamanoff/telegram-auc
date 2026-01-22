@@ -82,12 +82,23 @@ async function bootstrap() {
   const bidWorker = createBidWorker();
   app.use("/api/auctions", createAuctionRoutes(hub));
 
-  app.use((err: unknown, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
+  app.use((err: unknown, req: express.Request, res: express.Response, _next: express.NextFunction) => {
     if (err instanceof ZodError) {
       const issues = err.issues.map(i => `${i.path.join('.')}: ${i.message}`).join('; ');
+      console.error(`[ERROR] Validation error: ${issues}`, { path: req.path, method: req.method });
       return res.status(400).json({ error: `Validation error: ${issues}` });
     }
     if (err instanceof HttpError) {
+      // Логируем ошибки 400 для диагностики webhook проблем
+      if (err.status === 400) {
+        console.error(`[ERROR] ${err.status} ${err.message}`, { 
+          path: req.path, 
+          method: req.method,
+          headers: req.headers,
+        });
+      } else {
+        console.error(`[ERROR] ${err.status} ${err.message}`, { path: req.path, method: req.method });
+      }
       return res.status(err.status).json({ error: err.message });
     }
     if (err instanceof Error) {

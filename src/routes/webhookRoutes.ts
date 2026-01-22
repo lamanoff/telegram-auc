@@ -16,39 +16,77 @@ router.post(
   express.raw({ type: "application/json", limit: "100kb" }),
   asyncHandler(async (req, res) => {
     const rawBody = req.body as Buffer;
+    
+    // Логирование для диагностики
+    const signature = req.headers["crypto-pay-api-signature"] as string | undefined;
+    const hasSignature = !!signature;
+    const bodyLength = rawBody.length;
+    const bodyPreview = rawBody.toString().substring(0, 200);
+    
+    if (process.env.NODE_ENV !== 'production') {
+      console.log(`[Webhook] Received request: bodyLength=${bodyLength}, hasSignature=${hasSignature}, preview=${bodyPreview}`);
+    }
+    
     if (rawBody.length > 100000) {
+      console.error(`[Webhook] Payload too large: ${rawBody.length} bytes`);
       throw badRequest("Payload too large");
     }
-    const signature = req.headers["crypto-pay-api-signature"] as string | undefined;
+    
     if (!verifyWebhookSignature(rawBody, signature)) {
+      console.error(`[Webhook] Invalid signature: hasSignature=${hasSignature}, bodyLength=${bodyLength}`);
       throw badRequest("Invalid signature");
     }
+    
     let payload;
     try {
       payload = JSON.parse(rawBody.toString());
-    } catch {
+    } catch (e) {
+      console.error(`[Webhook] Invalid JSON: ${e instanceof Error ? e.message : 'Unknown error'}, body=${bodyPreview}`);
       throw badRequest("Invalid JSON");
     }
+    
     const event = payload.payload ?? payload;
     if (!event?.invoice_id) {
+      if (process.env.NODE_ENV !== 'production') {
+        console.log(`[Webhook] No invoice_id in event, ignoring`);
+      }
       res.json({ ok: true });
       return;
     }
+    
     if (event.asset !== "TON" && event.asset !== "USDT") {
+      if (process.env.NODE_ENV !== 'production') {
+        console.log(`[Webhook] Unsupported asset: ${event.asset}, ignoring`);
+      }
       res.json({ ok: true });
       return;
     }
+    
     if (event.status && event.status !== "paid" && event.status !== "completed") {
+      if (process.env.NODE_ENV !== 'production') {
+        console.log(`[Webhook] Status not paid/completed: ${event.status}, ignoring`);
+      }
       res.json({ ok: true });
       return;
     }
-    await handleInvoicePaid({
-      invoice_id: event.invoice_id,
-      asset: event.asset,
-      amount: event.amount,
-      status: event.status,
-    });
-    res.json({ ok: true });
+    
+    try {
+      await handleInvoicePaid({
+        invoice_id: event.invoice_id,
+        asset: event.asset,
+        amount: event.amount,
+        status: event.status,
+      });
+      res.json({ ok: true });
+    } catch (e) {
+      console.error(`[Webhook] Error handling invoice: ${e instanceof Error ? e.message : 'Unknown error'}`, {
+        invoice_id: event.invoice_id,
+        asset: event.asset,
+        amount: event.amount,
+        status: event.status,
+      });
+      throw e;
+    }
   })
 );
 

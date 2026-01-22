@@ -106,21 +106,65 @@ export async function createInvoice(params: {
 
 export function verifyWebhookSignature(rawBody: Buffer, signature?: string) {
   if (!config.cryptoBotWebhookSecret) {
+    if (process.env.NODE_ENV !== 'production') {
+      console.log(`[Webhook] CRYPTOBOT_WEBHOOK_SECRET not set, skipping signature verification`);
+    }
     return true;
   }
   if (!signature) {
+    console.error(`[Webhook] No signature header provided, but CRYPTOBOT_WEBHOOK_SECRET is set`);
     return false;
   }
-  const digest = crypto
+  
+  // Вычисляем ожидаемую подпись в hex формате
+  const digestHex = crypto
     .createHmac("sha256", config.cryptoBotWebhookSecret)
     .update(rawBody)
     .digest("hex");
-  const expected = Buffer.from(digest);
-  const provided = Buffer.from(signature);
-  if (expected.length !== provided.length) {
-    return false;
+  
+  // Вычисляем ожидаемую подпись в base64 формате (на случай, если CryptoBot отправляет в base64)
+  const digestBase64 = crypto
+    .createHmac("sha256", config.cryptoBotWebhookSecret)
+    .update(rawBody)
+    .digest("base64");
+  
+  // Убираем пробелы и переносы строк из подписи
+  const cleanSignature = signature.trim();
+  
+  // Проверяем hex формат (64 символа для SHA256)
+  let isValidHex = false;
+  if (cleanSignature.length === digestHex.length) {
+    isValidHex = crypto.timingSafeEqual(
+      Buffer.from(digestHex),
+      Buffer.from(cleanSignature)
+    );
   }
-  return crypto.timingSafeEqual(expected, provided);
+  
+  // Проверяем base64 формат (44 символа для SHA256)
+  let isValidBase64 = false;
+  if (cleanSignature.length === digestBase64.length) {
+    isValidBase64 = crypto.timingSafeEqual(
+      Buffer.from(digestBase64),
+      Buffer.from(cleanSignature)
+    );
+  }
+  
+  const isValid = isValidHex || isValidBase64;
+  
+  if (!isValid) {
+    console.error(`[Webhook] Signature verification failed`, {
+      signatureLength: cleanSignature.length,
+      expectedHexLength: digestHex.length,
+      expectedBase64Length: digestBase64.length,
+      signaturePreview: cleanSignature.substring(0, 20),
+      expectedHexPreview: digestHex.substring(0, 20),
+      expectedBase64Preview: digestBase64.substring(0, 20),
+    });
+  } else if (process.env.NODE_ENV !== 'production') {
+    console.log(`[Webhook] Signature verified successfully (format: ${isValidHex ? 'hex' : 'base64'})`);
+  }
+  
+  return isValid;
 }
 
 export async function handleInvoicePaid(payload: {
@@ -131,6 +175,7 @@ export async function handleInvoicePaid(payload: {
   payload?: string;
 }) {
   if (!payload.invoice_id || typeof payload.invoice_id !== 'number') {
+    console.error(`[Webhook] Invalid invoice ID: ${payload.invoice_id}, type: ${typeof payload.invoice_id}`);
     throw badRequest("Invalid invoice ID");
   }
   
@@ -139,8 +184,14 @@ export async function handleInvoicePaid(payload: {
     provider: "cryptobot",
     externalId: invoiceId,
   });
+  
+  if (process.env.NODE_ENV !== 'production') {
+    console.log(`[Webhook] Processing invoice: ${invoiceId}, transaction found: ${!!transaction}, has payload: ${!!payload.payload}`);
+  }
+  
   if (!transaction && payload.payload) {
     if (!mongoose.Types.ObjectId.isValid(payload.payload)) {
+      console.error(`[Webhook] Invalid user ID in payload: ${payload.payload}`);
       throw badRequest("Invalid user ID in payload");
     }
     transaction = await Transaction.create({
@@ -154,6 +205,7 @@ export async function handleInvoicePaid(payload: {
     });
   }
   if (!transaction) {
+    console.error(`[Webhook] Invoice not found: ${invoiceId}`);
     throw notFound("Invoice not found");
   }
   if (transaction.status === "completed") {
