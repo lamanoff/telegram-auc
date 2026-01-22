@@ -107,14 +107,10 @@ export async function createInvoice(params: {
 export function verifyWebhookSignature(body: any, signature?: string) {
   // Если токен не установлен, пропускаем проверку (для разработки)
   if (!config.cryptoBotToken) {
-    if (process.env.NODE_ENV !== 'production') {
-      console.log(`[Webhook] CRYPTOBOT_TOKEN not set, skipping signature verification`);
-    }
     return true;
   }
   
   if (!signature) {
-    console.error(`[Webhook] No signature header provided, but CRYPTOBOT_TOKEN is set`);
     return false;
   }
   
@@ -137,20 +133,7 @@ export function verifyWebhookSignature(body: any, signature?: string) {
     .digest("hex");
   
   const cleanSignature = signature.trim();
-  const isValid = hmac === cleanSignature;
-  
-  if (!isValid) {
-    console.error(`[Webhook] Signature verification failed`, {
-      signatureLength: cleanSignature.length,
-      expectedLength: hmac.length,
-      signaturePreview: cleanSignature.substring(0, 20),
-      expectedPreview: hmac.substring(0, 20),
-    });
-  } else if (process.env.NODE_ENV !== 'production') {
-    console.log(`[Webhook] Signature verified successfully`);
-  }
-  
-  return isValid;
+  return hmac === cleanSignature;
 }
 
 export async function handleInvoicePaid(payload: {
@@ -161,7 +144,6 @@ export async function handleInvoicePaid(payload: {
   payload?: string;
 }) {
   if (!payload.invoice_id || typeof payload.invoice_id !== 'number') {
-    console.error(`[Webhook] Invalid invoice ID: ${payload.invoice_id}, type: ${typeof payload.invoice_id}`);
     throw badRequest("Invalid invoice ID");
   }
   
@@ -171,13 +153,8 @@ export async function handleInvoicePaid(payload: {
     externalId: invoiceId,
   });
   
-  if (process.env.NODE_ENV !== 'production') {
-    console.log(`[Webhook] Processing invoice: ${invoiceId}, transaction found: ${!!transaction}, has payload: ${!!payload.payload}`);
-  }
-  
   if (!transaction && payload.payload) {
     if (!mongoose.Types.ObjectId.isValid(payload.payload)) {
-      console.error(`[Webhook] Invalid user ID in payload: ${payload.payload}`);
       throw badRequest("Invalid user ID in payload");
     }
     transaction = await Transaction.create({
@@ -191,7 +168,6 @@ export async function handleInvoicePaid(payload: {
     });
   }
   if (!transaction) {
-    console.error(`[Webhook] Invoice not found: ${invoiceId}`);
     throw notFound("Invoice not found");
   }
   if (transaction.status === "completed") {
