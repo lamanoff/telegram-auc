@@ -14,7 +14,7 @@ router.get("/webhook/cryptobot", (_req, res) => {
 router.post(
   "/webhook/cryptobot",
   asyncHandler(async (req, res) => {
-    const rawBody = req.body as Buffer;
+    const rawBody = req.body as Buffer | unknown;
     
     // Логирование для диагностики
     const signature = req.headers["crypto-pay-api-signature"] as string | undefined;
@@ -25,7 +25,7 @@ router.post(
       console.error(`[Webhook] Body is not a Buffer`, { 
         isBuffer: Buffer.isBuffer(rawBody),
         bodyType: typeof rawBody,
-        bodyConstructor: rawBody?.constructor?.name,
+        bodyConstructor: (rawBody as any)?.constructor?.name,
         hasRawBody: !!(req as any).rawBody,
         rawBodyValue: rawBody,
         reqBodyType: typeof req.body,
