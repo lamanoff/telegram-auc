@@ -1,10 +1,38 @@
-import { Router } from "express";
-import express from "express";
+import { Router, Request, Response, NextFunction } from "express";
 import { asyncHandler } from "../utils/asyncHandler";
 import { handleInvoicePaid, verifyWebhookSignature } from "../services/cryptobotService";
 import { badRequest } from "../utils/errors";
 
 const router = Router();
+
+// Middleware для чтения raw body
+function rawBodyMiddleware(req: Request, res: Response, next: NextFunction) {
+  if (req.method !== 'POST') {
+    return next();
+  }
+  
+  const maxSize = 100 * 1024; // 100KB
+  let totalSize = 0;
+  const chunks: Buffer[] = [];
+  
+  req.on('data', (chunk: Buffer) => {
+    totalSize += chunk.length;
+    if (totalSize > maxSize) {
+      req.destroy();
+      return next(badRequest("Payload too large"));
+    }
+    chunks.push(chunk);
+  });
+  
+  req.on('end', () => {
+    (req as any).rawBody = Buffer.concat(chunks);
+    next();
+  });
+  
+  req.on('error', (err) => {
+    next(err);
+  });
+}
 
 // GET endpoint для проверки доступности вебхука (CryptoBot проверяет доступность перед настройкой)
 router.get("/webhook/cryptobot", (_req, res) => {
@@ -13,16 +41,17 @@ router.get("/webhook/cryptobot", (_req, res) => {
 
 router.post(
   "/webhook/cryptobot",
-  express.raw({ type: "application/json", limit: "100kb" }),
+  rawBodyMiddleware,
   asyncHandler(async (req, res) => {
-    const rawBody = req.body as Buffer;
+    const rawBody = (req as any).rawBody as Buffer;
     
     // Проверяем, что rawBody действительно Buffer
     if (!Buffer.isBuffer(rawBody)) {
       console.error(`[Webhook] Body is not a Buffer, got: ${typeof rawBody}`, { 
         isBuffer: Buffer.isBuffer(rawBody),
         bodyType: typeof rawBody,
-        bodyConstructor: rawBody?.constructor?.name 
+        bodyConstructor: rawBody?.constructor?.name,
+        hasRawBody: !!(req as any).rawBody
       });
       throw badRequest("Invalid request body format");
     }
