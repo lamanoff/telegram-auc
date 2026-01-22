@@ -232,12 +232,12 @@ cp env.example .env
 - `JWT_SECRET` - Секретный ключ для JWT (минимум 32 символа). Для тестирования можно использовать любой длинный случайный ключ.
 
 **Опциональные переменные (для полного функционала):**
-- `CRYPTOBOT_TOKEN` - Токен CryptoBot API (получить на https://crypt.bot/)
+- `CRYPTOBOT_TOKEN` - Токен CryptoBot API
 - `CRYPTOBOT_WEBHOOK_SECRET` - Секрет для верификации webhook от CryptoBot
 - `TELEGRAM_BOT_TOKEN` - Токен Telegram бота (если используется Telegram авторизация)
 
 **Для получения CryptoBot токена:**
-1. Зарегистрируйтесь на https://crypt.bot/
+1. Зарегистрируйтесь на crypto bot
 2. Перейдите в раздел "API"
 3. Создайте новый токен
 4. Скопируйте токен в `.env` файл
