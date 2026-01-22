@@ -23,7 +23,7 @@
               </router-link>
               <div class="balance-display">
                 <span class="balance-label">Баланс</span>
-                <span class="balance-value">{{ formatBalance(authStore.user?.balances?.TON?.available || '0', 'TON') }}</span>
+                <span class="balance-value">{{ formatBalance(authStore.user?.balances?.TON?.total || '0', 'TON') }}</span>
               </div>
               <button @click="handleLogout" class="btn-logout">
                 Выход

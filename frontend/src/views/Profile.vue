@@ -187,6 +187,9 @@
 import { ref, onMounted } from 'vue'
 import api from '../api'
 import { formatBalance } from '../utils/amount'
+import { useAuthStore } from '../stores/auth'
+
+const authStore = useAuthStore()
 
 const balances = ref({ TON: {}, USDT: {} })
 const depositCurrency = ref('TON')
@@ -206,6 +209,8 @@ const fetchProfile = async () => {
   try {
     const response = await api.get('/profile')
     balances.value = response.data.balances
+    // Также обновляем authStore для синхронизации баланса в навигации
+    await authStore.fetchProfile()
   } catch (err) {
     console.error('Error fetching profile:', err)
   }
