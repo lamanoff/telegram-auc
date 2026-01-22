@@ -70,21 +70,33 @@ router.post(
   "/deposit",
   requireAuth,
   asyncHandler(async (req, res) => {
-    const data = depositSchema.parse(req.body);
-    const user = await User.findById(req.user?.id);
-    if (!user) {
-      throw notFound("User not found");
-    }
+    try {
+      const data = depositSchema.parse(req.body);
+      const user = await User.findById(req.user?.id);
+      if (!user) {
+        throw notFound("User not found");
+      }
 
-    if (!data.amount) {
-      throw badRequest("Amount required");
+      if (!data.amount) {
+        throw badRequest("Amount required");
+      }
+      const invoice = await createInvoice({
+        userId: user._id.toString(),
+        currency: data.currency,
+        amount: data.amount,
+      });
+      res.json({ provider: "cryptobot", invoice });
+    } catch (error) {
+      // Логируем ошибки валидации для отладки
+      if (error instanceof z.ZodError) {
+        console.error("[Deposit Validation Error]", {
+          errors: error.errors,
+          body: req.body,
+          userId: req.user?.id,
+        });
+      }
+      throw error;
     }
-    const invoice = await createInvoice({
-      userId: user._id.toString(),
-      currency: data.currency,
-      amount: data.amount,
-    });
-    res.json({ provider: "cryptobot", invoice });
   })
 );
 

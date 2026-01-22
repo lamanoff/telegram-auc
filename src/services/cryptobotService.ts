@@ -64,7 +64,13 @@ export async function createInvoice(params: {
 
   const data = (await response.json()) as CryptoBotInvoiceResponse;
   if (!data.ok) {
-    throw badRequest("Failed to create invoice");
+    const errorMessage = (data as any).error?.name || (data as any).error?.message || "Failed to create invoice";
+    console.error(`[CryptoBot API Error] ${errorMessage}`, { 
+      status: response.status, 
+      response: data,
+      params: { currency: params.currency, amount: params.amount }
+    });
+    throw badRequest(`Failed to create invoice: ${errorMessage}`);
   }
 
   await Transaction.create({
