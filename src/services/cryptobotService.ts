@@ -31,8 +31,8 @@ export async function createInvoice(params: {
   currency: Currency;
   amount: string;
 }) {
-  if (!config.cryptoBotToken) {
-    throw badRequest("CryptoBot token not configured");
+  if (!config.cryptoBotToken || config.cryptoBotToken.trim() === "") {
+    throw badRequest("CryptoBot token not configured. Please set CRYPTOBOT_TOKEN in environment variables.");
   }
   if (!mongoose.Types.ObjectId.isValid(params.userId)) {
     throw badRequest("Invalid user ID");
@@ -64,13 +64,20 @@ export async function createInvoice(params: {
 
   const data = (await response.json()) as CryptoBotInvoiceResponse;
   if (!data.ok) {
-    const errorMessage = (data as any).error?.name || (data as any).error?.message || "Failed to create invoice";
-    console.error(`[CryptoBot API Error] ${errorMessage}`, { 
+    const errorCode = (data as any).error?.code;
+    const errorName = (data as any).error?.name || (data as any).error?.message || "Failed to create invoice";
+    console.error(`[CryptoBot API Error] ${errorName}`, { 
       status: response.status, 
       response: data,
       params: { currency: params.currency, amount: params.amount }
     });
-    throw badRequest(`Failed to create invoice: ${errorMessage}`);
+    
+    // Более понятные сообщения для распространенных ошибок
+    if (errorCode === 401 || errorName === "UNAUTHORIZED") {
+      throw badRequest("Invalid CryptoBot token. Please check your CRYPTOBOT_TOKEN in environment variables.");
+    }
+    
+    throw badRequest(`Failed to create invoice: ${errorName}`);
   }
 
   await Transaction.create({
