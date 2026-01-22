@@ -31,6 +31,11 @@
             <span class="next-round-value">{{ formatBalance(auction.nextRoundMinBid, auction.currency) }}</span>
           </div>
         </div>
+        
+        <div class="header-countdown" v-if="auction.status === 'scheduled' && auction.startTime">
+          <span class="countdown-label">До начала аукциона</span>
+          <div class="countdown-value">{{ countdownText }}</div>
+        </div>
       </div>
 
       <!-- Stats Grid -->
@@ -158,12 +163,14 @@ const placingBid = ref(false)
 const bidError = ref('')
 const bidSuccess = ref(false)
 const ws = ref(null)
+const countdownText = ref('')
 
 const fetchAuction = async () => {
   try {
     const response = await api.get(`/auctions/${route.params.id}`)
     auction.value = response.data
     error.value = ''
+    updateCountdown()
   } catch (err) {
     error.value = err.response?.data?.error || 'Ошибка загрузки аукциона'
   } finally {
@@ -224,6 +231,37 @@ const getStatusBadgeClass = (status) => {
   return classMap[status] || ''
 }
 
+const updateCountdown = () => {
+  if (auction.value.status !== 'scheduled' || !auction.value.startTime) {
+    countdownText.value = ''
+    return
+  }
+  
+  const now = new Date()
+  const startTime = new Date(auction.value.startTime)
+  const diff = startTime - now
+  
+  if (diff <= 0) {
+    countdownText.value = 'Аукцион должен начаться...'
+    // Обновляем данные аукциона, возможно он уже начался
+    fetchAuction()
+    return
+  }
+  
+  const days = Math.floor(diff / (1000 * 60 * 60 * 24))
+  const hours = Math.floor((diff % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60))
+  const minutes = Math.floor((diff % (1000 * 60 * 60)) / (1000 * 60))
+  const seconds = Math.floor((diff % (1000 * 60)) / 1000)
+  
+  const parts = []
+  if (days > 0) parts.push(`${days} ${days === 1 ? 'день' : days < 5 ? 'дня' : 'дней'}`)
+  if (hours > 0 || days > 0) parts.push(`${hours} ${hours === 1 ? 'час' : hours < 5 ? 'часа' : 'часов'}`)
+  if (minutes > 0 || hours > 0 || days > 0) parts.push(`${minutes} ${minutes === 1 ? 'минута' : minutes < 5 ? 'минуты' : 'минут'}`)
+  parts.push(`${seconds} ${seconds === 1 ? 'секунда' : seconds < 5 ? 'секунды' : 'секунд'}`)
+  
+  countdownText.value = parts.join(' ')
+}
+
 const setupWebSocket = () => {
   if (!authStore.token) return
   
@@ -231,6 +269,7 @@ const setupWebSocket = () => {
   
   ws.value.on('snapshot', (data) => {
     auction.value = data
+    updateCountdown()
   })
   
   ws.value.on('bid.updated', (data) => {
@@ -271,6 +310,7 @@ const setupWebSocket = () => {
 }
 
 let interval = null
+let countdownInterval = null
 
 onMounted(async () => {
   await fetchAuction()
@@ -281,10 +321,17 @@ onMounted(async () => {
   interval = setInterval(() => {
     fetchAuction()
   }, 2000)
+  
+  // Обновляем таймер каждую секунду
+  updateCountdown()
+  countdownInterval = setInterval(() => {
+    updateCountdown()
+  }, 1000)
 })
 
 onUnmounted(() => {
   if (interval) clearInterval(interval)
+  if (countdownInterval) clearInterval(countdownInterval)
   if (ws.value) ws.value.disconnect()
 })
 </script>
@@ -345,6 +392,30 @@ onUnmounted(() => {
   background: rgba(0, 255, 136, 0.1);
   border: 1px solid rgba(0, 255, 136, 0.2);
   border-radius: 16px;
+}
+
+.header-countdown {
+  text-align: right;
+  padding: 20px 24px;
+  background: rgba(59, 130, 246, 0.1);
+  border: 1px solid rgba(59, 130, 246, 0.2);
+  border-radius: 16px;
+}
+
+.countdown-label {
+  font-size: 12px;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  margin-bottom: 4px;
+  display: block;
+}
+
+.countdown-value {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 24px;
+  font-weight: 700;
+  color: var(--accent-cyan);
+  white-space: nowrap;
 }
 
 .next-round-price {

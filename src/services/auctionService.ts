@@ -154,6 +154,7 @@ export async function getAuctionDetails(auctionId: string, userId?: string) {
     description: auction.description,
     currency: auction.currency,
     status: auction.status,
+    startTime: auction.startTime,
     currentRound: auction.currentRound,
     totalRounds: auction.roundsCount,
     roundEndsAt: auction.roundEndsAt,
