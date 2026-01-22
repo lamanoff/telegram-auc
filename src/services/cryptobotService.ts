@@ -49,7 +49,12 @@ export async function createInvoice(params: {
     throw badRequest("Amount exceeds maximum limit");
   }
 
-  const response = await fetch(`${config.cryptoBotApiBase}/createInvoice`, {
+  const apiUrl = `${config.cryptoBotApiBase}/createInvoice`;
+  if (process.env.NODE_ENV !== 'production') {
+    console.log(`[CryptoBot] Creating invoice via ${config.cryptoBotApiBase}`);
+  }
+
+  const response = await fetch(apiUrl, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
