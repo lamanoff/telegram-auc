@@ -44,6 +44,9 @@ router.post(
       throw badRequest("Invalid signature");
     }
     
+    // CryptoBot может отправлять webhook в двух форматах:
+    // 1. { update_id, update_type, payload: { invoice_id, asset, amount, status, payload: userId } }
+    // 2. { invoice_id, asset, amount, status, payload: userId }
     const event = payload.payload ?? payload;
     if (!event?.invoice_id) {
       res.json({ ok: true });
@@ -65,6 +68,7 @@ router.post(
       asset: event.asset,
       amount: event.amount,
       status: event.status,
+      payload: event.payload, // userId, который мы передали при создании инвойса
     });
     res.json({ ok: true });
   })

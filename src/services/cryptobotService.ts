@@ -153,6 +153,7 @@ export async function handleInvoicePaid(payload: {
     externalId: invoiceId,
   });
   
+  // Если транзакция не найдена, но есть payload (userId), создаем новую
   if (!transaction && payload.payload) {
     if (!mongoose.Types.ObjectId.isValid(payload.payload)) {
       throw badRequest("Invalid user ID in payload");
@@ -167,7 +168,10 @@ export async function handleInvoicePaid(payload: {
       externalId: invoiceId,
     });
   }
+  
   if (!transaction) {
+    // Логируем для диагностики, если транзакция не найдена
+    console.error(`[Webhook] Invoice not found: invoice_id=${invoiceId}, hasPayload=${!!payload.payload}`);
     throw notFound("Invoice not found");
   }
   if (transaction.status === "completed") {
